@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GmailGenie</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">
+      <span class="logo-icon">&#128197;</span>
+      <span class="logo-text">GmailGenie</span>
+    </div>
+    <button id="settings-btn" class="icon-btn" title="Settings">&#9881;</button>
+  </header>
+
+  <!-- Main content — state rendered by popup.js -->
+  <main id="main-content"></main>
+
+  <!-- Settings drawer -->
+  <div id="settings-panel" class="settings-panel hidden">
+    <h3>Settings</h3>
+    <div class="form-group">
+      <label for="api-key-input">Anthropic API Key</label>
+      <input
+        type="password"
+        id="api-key-input"
+        placeholder="sk-ant-..."
+        autocomplete="off"
+      />
+      <p class="hint">Stored locally. Never sent anywhere except api.anthropic.com.</p>
+    </div>
+    <div class="button-row">
+      <button id="save-key-btn" class="btn primary">Save</button>
+      <button id="cancel-settings-btn" class="btn secondary">Cancel</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
