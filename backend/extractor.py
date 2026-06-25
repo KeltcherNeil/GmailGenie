@@ -8,6 +8,7 @@ app.py routes call extract_event() and nothing else.
 import json
 import os
 import re
+from datetime import date
 
 from anthropic import Anthropic
 
@@ -63,6 +64,8 @@ def extract_event(subject: str, body: str, sender: str = '') -> dict:
         ValueError: If Claude returns output that cannot be parsed as JSON.
         anthropic.APIError: On API-level failures (propagated to caller).
     """
+    today = date.today().strftime('%A, %B %d, %Y')  # e.g. "Wednesday, June 25, 2026"
+
     email_text = f"Subject: {subject}\n"
     if sender:
         email_text += f"From: {sender}\n"
@@ -73,7 +76,7 @@ def extract_event(subject: str, body: str, sender: str = '') -> dict:
         max_tokens=512,
         system=SYSTEM_PROMPT,
         messages=[
-            {'role': 'user', 'content': f'EMAIL:\n{email_text}'}
+            {'role': 'user', 'content': f"Today's date: {today}\n\nEMAIL:\n{email_text}"}
         ]
     )
 

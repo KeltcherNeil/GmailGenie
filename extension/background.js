@@ -26,6 +26,13 @@ If no scheduling information is found:
 // Track the latest processing job to ignore stale results when emails change quickly
 let currentJobId = null;
 
+// Returns e.g. "Wednesday, June 25, 2026" so Claude can resolve relative dates
+function todayString() {
+  return new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+}
+
 async function extractEvent(emailData, apiKey) {
   const emailText = [
     `Subject: ${emailData.subject}`,
@@ -48,7 +55,7 @@ async function extractEvent(emailData, apiKey) {
       max_tokens: 512,
       system: SYSTEM_PROMPT,
       messages: [
-        { role: 'user', content: `EMAIL:\n${emailText}` }
+        { role: 'user', content: `Today's date: ${todayString()}\n\nEMAIL:\n${emailText}` }
       ]
     })
   });
