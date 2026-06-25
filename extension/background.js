@@ -52,7 +52,7 @@ async function extractEvent(emailData, apiKey) {
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 512,
+      max_tokens: 256,
       system: SYSTEM_PROMPT,
       messages: [
         { role: 'user', content: `Today's date: ${todayString()}\n\nEMAIL:\n${emailText}` }

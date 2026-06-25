@@ -62,7 +62,7 @@ function getGmailContent() {
     ? senderEl.getAttribute('email') || senderEl.innerText.trim()
     : '';
 
-  return { subject, body: body.substring(0, 3000), sender, platform: 'gmail' };
+  return { subject, body: body.substring(0, 1500), sender, platform: 'gmail' };
 }
 
 // ── Outlook helpers ───────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ function getOutlookContent() {
 
   if (!body || body.length < 10) return null;
 
-  return { subject, body: body.substring(0, 3000), sender, platform: 'outlook' };
+  return { subject, body: body.substring(0, 1500), sender, platform: 'outlook' };
 }
 
 // ── Unified check ─────────────────────────────────────────────────────────────
@@ -184,26 +184,39 @@ function isExtensionValid() {
 
 // ── Navigation detection ──────────────────────────────────────────────────────
 
+// For DOM-only mutations (no URL change): debounce to avoid hammering on every
+// Gmail animation or real-time email-list update.
 function scheduleCheck() {
   if (!isExtensionValid()) { observer.disconnect(); return; }
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(checkForEmailChange, 1200);
+  debounceTimer = setTimeout(checkForEmailChange, 500);
+}
+
+// On explicit navigation (user clicked a new email): try immediately, then
+// retry at 350 ms and 750 ms in case the email body hasn't rendered yet.
+// lastEmailId guards prevent double-processing the same email.
+function onNavigate() {
+  if (!isExtensionValid()) return;
+  clearTimeout(debounceTimer);
+  checkForEmailChange();                                 // 0 ms — best case
+  debounceTimer = setTimeout(checkForEmailChange, 350); // 350 ms — typical
+  setTimeout(checkForEmailChange, 750);                 // 750 ms — slow render
 }
 
 // Gmail: hash-based routing
-window.addEventListener('hashchange', scheduleCheck);
+window.addEventListener('hashchange', onNavigate);
 
-// Outlook: uses History API (pushState / replaceState) — detect via popstate
-window.addEventListener('popstate', scheduleCheck);
+// Outlook: uses History API (pushState / replaceState)
+window.addEventListener('popstate', onNavigate);
 
 // Both: catch framework-driven URL changes and lazy-loaded content
 let lastHref = location.href;
 const observer = new MutationObserver(() => {
   if (location.href !== lastHref) {
     lastHref = location.href;
-    scheduleCheck();
+    onNavigate();    // URL changed — treat as navigation
   } else {
-    scheduleCheck();
+    scheduleCheck(); // same URL, DOM mutated — normal debounce
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });
@@ -357,4 +370,5 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 // Initial check after the page has had time to render
-setTimeout(checkForEmailChange, 2000);
+// Reduced from 2000ms — content script runs at document_idle so page is ready
+setTimeout(checkForEmailChange, 800);
