@@ -200,3 +200,39 @@ tests/test_emails/has_event/email_001_expected.json  # expected extraction outpu
 - Multi-event extraction: handle emails containing more than one proposed meeting time
 - Confidence scoring: only show the popup when extraction confidence is above a threshold
 - Hosted backend: deploy Flask app to Railway or Render so others can install the extension
+
+### Outlook — Microsoft Graph API integration
+
+Currently the extension reads Outlook by scraping the DOM when Outlook web is open in Chrome.
+This does NOT work in the native Outlook desktop app.
+
+The proper fix is to replace the DOM scraper with **Microsoft Graph API** calls:
+
+**User experience:**
+- Gmail: zero setup (DOM reading, no auth)
+- Outlook: one-time "Sign in with Microsoft" OAuth click in the popup — same flow users
+  already know from connecting Outlook to Slack, Zoom, etc.
+
+**Popup UI to build:**
+```
+Gmail        ✅ Connected
+Outlook      [ Connect Microsoft Account ]
+```
+
+**API approach:**
+- Auth:    Chrome's `chrome.identity.launchWebAuthFlow` with PKCE (no client secret needed)
+- Email:   `GET https://graph.microsoft.com/v1.0/me/messages/{id}`
+- Perms:   `Mail.Read` + `offline_access` (delegated, user-level)
+- Token:   Store in `chrome.storage.local`, refresh automatically
+
+**What Neil needs to do first (one-time developer setup):**
+1. Go to portal.azure.com → App registrations → New registration
+2. Set redirect URI to `chrome-extension://<extension-id>/oauth.html`
+3. Add `Mail.Read` delegated permission (no admin consent required)
+4. Copy the Application (client) ID into the extension
+
+**Why this is better than DOM scraping:**
+- Works in the desktop app, web app, anywhere — API-level not DOM-level
+- Microsoft maintains it — no broken selectors when Outlook updates
+- Returns clean structured JSON including native calendar invite fields
+- Can detect new emails without the user having one actively open
