@@ -23,24 +23,35 @@ let debounceTimer = null;
 function getGmailEmailId() {
   // Gmail hash: #inbox/AbCd1234  #all/AbCd1234  #label/Work/AbCd1234
   const match = window.location.hash.match(/#[^/]+\/([A-Za-z0-9]+)(?:\/|$)/);
-  return match ? match[1] : null;
+  if (match) return match[1];
+
+  // Fallback for reading-pane / split-view where the hash has no message ID:
+  // fingerprint the visible email body so we still detect new emails
+  const bodyEl = getGmailBodyEl();
+  if (!bodyEl) return null;
+  const snippet = bodyEl.innerText.trim().substring(0, 80);
+  return snippet.length > 10 ? 'body:' + btoa(encodeURIComponent(snippet)).substring(0, 30) : null;
+}
+
+function getGmailBodyEl() {
+  const selectors = ['.a3s.aiL', '.a3s', '.ii.gt .a3s', '.gs .a3s', '.adn.ads .a3s'];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 10) return el;
+  }
+  return null;
 }
 
 function getGmailContent() {
-  // Gmail obfuscates class names; try several known selectors
-  const bodySelectors = ['.a3s.aiL', '.a3s', '.ii.gt .a3s', '.gs .a3s'];
-  let bodyEl = null;
-  for (const sel of bodySelectors) {
-    const el = document.querySelector(sel);
-    if (el && el.innerText.trim().length > 20) { bodyEl = el; break; }
-  }
+  const bodyEl = getGmailBodyEl();
+  if (!bodyEl) return null;
 
+  const body = bodyEl.innerText.trim();
+  if (!body) return null;
+
+  // Subject is optional — no-subject emails don't always render h2.hP
   const subjectEl = document.querySelector('h2.hP');
-  if (!bodyEl || !subjectEl) return null;
-
-  const body    = bodyEl.innerText.trim();
-  const subject = subjectEl.innerText.trim();
-  if (!body || !subject) return null;
+  const subject   = subjectEl?.innerText.trim() || '(no subject)';
 
   const senderEl = document.querySelector('.gD');
   const sender   = senderEl
