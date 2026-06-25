@@ -1,0 +1,11 @@
+Hello,
+
+This is a reminder that you have an appointment with Dr. Johnson on April 5th at 10:30 AM.
+Location: 123 Medical Center Drive, Suite 400.
+
+Please arrive 15 minutes early and bring your insurance card.
+
+If you need to reschedule, call us at (555) 234-5678.
+
+Regards,
+City Medical Group

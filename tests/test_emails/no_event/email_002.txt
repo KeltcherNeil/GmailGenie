@@ -1,0 +1,11 @@
+Your Amazon order #123-456-789 has shipped!
+
+Your package is on its way and will arrive in 3-5 business days.
+
+Items ordered:
+- Mechanical Keyboard (x1)
+- USB-C Hub (x1)
+
+Track your package at: amazon.com/orders
+
+Thank you for shopping with Amazon.
