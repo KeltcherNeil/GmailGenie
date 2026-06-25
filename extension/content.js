@@ -33,11 +33,21 @@ function getGmailEmailId() {
   return snippet.length > 10 ? 'body:' + btoa(encodeURIComponent(snippet)).substring(0, 30) : null;
 }
 
+function isVisible(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+  const style = getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
 function getGmailBodyEl() {
   const selectors = ['.a3s.aiL', '.a3s', '.ii.gt .a3s', '.gs .a3s', '.adn.ads .a3s'];
   for (const sel of selectors) {
     const el = document.querySelector(sel);
-    if (el && el.innerText.trim().length > 10) {
+    // Require the element to be visible — Gmail caches hidden .a3s elements
+    // in the DOM when the user returns to the inbox, which would cause false triggers
+    if (el && el.innerText.trim().length > 10 && isVisible(el)) {
       console.log('[GmailGenie] body found via selector:', sel);
       return el;
     }
