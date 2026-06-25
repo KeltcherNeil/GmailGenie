@@ -143,9 +143,25 @@ async function openCalendarTab(url, sourceTabId) {
 // We detect that redirect, switch focus back to the Gmail/Outlook tab,
 // and close the Calendar tab.
 
+// Returns true only when Google Calendar has fully landed on the main calendar
+// view after saving — i.e. /calendar/r or /calendar/r/week/2026/6/... etc.
+// Any edit/template/intermediate URL returns false so we never close prematurely.
+function isCalendarHomeUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'calendar.google.com') return false;
+    // Must be under /calendar/r (the SPA calendar view)
+    if (!/^\/calendar\/r(\/|$)/.test(u.pathname)) return false;
+    // Must NOT be an editing or template page
+    if (u.pathname.includes('eventedit')) return false;
+    if (u.searchParams.has('action')) return false;
+    return true;
+  } catch { return false; }
+}
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Only act once the tab has fully loaded and we have a URL
   if (changeInfo.status !== 'complete' || !tab.url) return;
-  if (!tab.url.includes('calendar.google.com')) return;
 
   const { calTabId, calSourceTabId } = await chrome.storage.local.get([
     'calTabId', 'calSourceTabId'
@@ -153,11 +169,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   if (tabId !== calTabId) return;
 
-  // Still on the template form or the "more options" edit form — not saved yet
-  if (tab.url.includes('action=TEMPLATE')) return;
-  if (tab.url.includes('action=EDIT') || tab.url.includes('eventedit')) return;
+  // Wait until we're on the main calendar home — this is the definitive signal
+  // that the event was saved and all redirects are complete. Firing on any
+  // earlier URL causes the "Leave site?" dialog because Chrome detects the
+  // form is still active during intermediate redirects.
+  if (!isCalendarHomeUrl(tab.url)) return;
 
-  // Landed on the main calendar view (/calendar/r...) — event was saved
   if (calSourceTabId) {
     chrome.tabs.update(calSourceTabId, { active: true }).catch(() => {});
   }
