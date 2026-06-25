@@ -1,92 +1,187 @@
-// content.js — Reads Gmail DOM and sends email data to background.js
+// content.js — Reads email DOM on Gmail and Outlook, sends data to background.js
 
-let lastEmailHash = null;
+// ── Platform detection ────────────────────────────────────────────────────────
+
+const PLATFORM = (() => {
+  const h = window.location.hostname;
+  if (h === 'mail.google.com') return 'gmail';
+  if (h.includes('outlook')) return 'outlook';
+  return null;
+})();
+
+if (!PLATFORM) {
+  throw new Error('GmailGenie: unsupported host, content script exiting.');
+}
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+
+let lastEmailId  = null;
 let debounceTimer = null;
 
-// Gmail URL hash contains the thread/message ID when viewing an email
-function getCurrentEmailHash() {
-  const hash = window.location.hash;
-  // Email view hashes: #inbox/AbCd1234, #all/..., #label/Inbox/...
-  const match = hash.match(/#[^/]+\/([A-Za-z0-9]+)(?:\/|$)/);
+// ── Gmail helpers ─────────────────────────────────────────────────────────────
+
+function getGmailEmailId() {
+  // Gmail hash: #inbox/AbCd1234  #all/AbCd1234  #label/Work/AbCd1234
+  const match = window.location.hash.match(/#[^/]+\/([A-Za-z0-9]+)(?:\/|$)/);
   return match ? match[1] : null;
 }
 
-// Try multiple Gmail selectors — Gmail obfuscates class names and changes them
-function getEmailContent() {
+function getGmailContent() {
+  // Gmail obfuscates class names; try several known selectors
   const bodySelectors = ['.a3s.aiL', '.a3s', '.ii.gt .a3s', '.gs .a3s'];
   let bodyEl = null;
   for (const sel of bodySelectors) {
-    bodyEl = document.querySelector(sel);
-    if (bodyEl && bodyEl.innerText.trim().length > 20) break;
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 20) { bodyEl = el; break; }
   }
 
   const subjectEl = document.querySelector('h2.hP');
-
   if (!bodyEl || !subjectEl) return null;
 
-  const body = bodyEl.innerText.trim();
+  const body    = bodyEl.innerText.trim();
   const subject = subjectEl.innerText.trim();
   if (!body || !subject) return null;
 
-  // Sender: try the .gD element which has an "email" attribute
   const senderEl = document.querySelector('.gD');
-  const sender = senderEl
+  const sender   = senderEl
     ? senderEl.getAttribute('email') || senderEl.innerText.trim()
     : '';
 
-  return {
-    subject,
-    // Cap body at 3000 chars to keep API calls cheap
-    body: body.substring(0, 3000),
-    sender
-  };
+  return { subject, body: body.substring(0, 3000), sender, platform: 'gmail' };
+}
+
+// ── Outlook helpers ───────────────────────────────────────────────────────────
+
+function getOutlookEmailId() {
+  // Full-screen view: URL contains /id/<messageId>
+  const urlMatch = window.location.href.match(/\/id\/([A-Za-z0-9%_=+/-]{10,})/i);
+  if (urlMatch) return decodeURIComponent(urlMatch[1]).substring(0, 60);
+
+  // Reading-pane view: URL doesn't change — use a fingerprint of the body text
+  const bodyEl = getOutlookBodyEl();
+  if (!bodyEl) return null;
+  const snippet = bodyEl.innerText.trim().substring(0, 80);
+  return snippet.length > 10 ? btoa(encodeURIComponent(snippet)).substring(0, 30) : null;
+}
+
+function getOutlookBodyEl() {
+  // Outlook uses aria-label reliably across consumer and enterprise versions
+  const selectors = [
+    '[aria-label="Message body"]',
+    'div[class*="ReadingPane"] [role="document"]',
+    '[data-app-section="ConversationContainer"] [role="document"]',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 20) return el;
+  }
+  return null;
+}
+
+function getOutlookSubject() {
+  // Try attribute-based selectors first (more stable than class names)
+  const candidates = [
+    document.querySelector('[data-testid="subject"]'),
+    document.querySelector('[aria-label^="Subject:"]'),
+    document.querySelector('[class*="subject" i]'),
+    document.querySelector('[class*="Subject" i]'),
+  ];
+  for (const el of candidates) {
+    if (el && el.innerText.trim()) return el.innerText.trim();
+  }
+
+  // Fall back to page title: "My Subject - Outlook" or "My Subject - Mail"
+  const title = document.title || '';
+  const stripped = title.replace(/\s*[-–|]\s*(Outlook|Mail|Microsoft Outlook)\s*$/i, '').trim();
+  return stripped || 'Email';
+}
+
+function getOutlookSender() {
+  // Outlook renders sender info with aria-label or data attributes
+  const fromEl = document.querySelector('[aria-label^="From"]') ||
+                 document.querySelector('[data-testid="senderName"]');
+  if (fromEl) return fromEl.innerText.trim();
+
+  // Outlook sometimes puts sender email in a mailto link
+  const mailtoEl = document.querySelector('a[href^="mailto:"]');
+  if (mailtoEl) return mailtoEl.href.replace('mailto:', '').split('?')[0];
+
+  return '';
+}
+
+function getOutlookContent() {
+  const bodyEl = getOutlookBodyEl();
+  if (!bodyEl) return null;
+
+  const body    = bodyEl.innerText.trim();
+  const subject = getOutlookSubject();
+  const sender  = getOutlookSender();
+
+  if (!body || body.length < 10) return null;
+
+  return { subject, body: body.substring(0, 3000), sender, platform: 'outlook' };
+}
+
+// ── Unified check ─────────────────────────────────────────────────────────────
+
+function getCurrentEmailId() {
+  return PLATFORM === 'gmail' ? getGmailEmailId() : getOutlookEmailId();
+}
+
+function getCurrentEmailContent() {
+  return PLATFORM === 'gmail' ? getGmailContent() : getOutlookContent();
 }
 
 function checkForEmailChange() {
-  const currentHash = getCurrentEmailHash();
+  const currentId = getCurrentEmailId();
 
-  if (!currentHash) {
-    // Not viewing an email — clear any stored event so popup shows idle state
-    if (lastEmailHash !== null) {
-      lastEmailHash = null;
-      chrome.storage.local.set({
-        status: 'idle',
-        event: null,
-        error: null,
-        emailData: null
-      });
+  if (!currentId) {
+    // Not in an email view — reset so the popup shows idle state
+    if (lastEmailId !== null) {
+      lastEmailId = null;
+      chrome.storage.local.set({ status: 'idle', event: null, error: null, emailData: null });
     }
     return;
   }
 
-  if (currentHash === lastEmailHash) return; // Same email, skip
+  if (currentId === lastEmailId) return; // Same email, nothing to do
 
-  const emailData = getEmailContent();
-  if (!emailData) return; // Content not in DOM yet — observer will retry
+  const emailData = getCurrentEmailContent();
+  if (!emailData) return; // Content not loaded yet — observer will fire again
 
-  lastEmailHash = currentHash;
+  lastEmailId = currentId;
 
   chrome.runtime.sendMessage({ type: 'EMAIL_OPENED', payload: emailData }, () => {
-    if (chrome.runtime.lastError) {
-      // Background service worker may have been sleeping — Chrome wakes it on
-      // the next sendMessage, so this is fine to ignore silently.
-    }
+    // chrome.runtime.lastError just means the service worker was sleeping;
+    // Chrome wakes it on the next message, so silently ignore.
+    void chrome.runtime.lastError;
   });
 }
 
-// Detect Gmail SPA navigation via URL hash changes
-window.addEventListener('hashchange', () => {
+// ── Navigation detection ──────────────────────────────────────────────────────
+
+function scheduleCheck() {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(checkForEmailChange, 1200);
-});
+}
 
-// MutationObserver catches lazy-loaded email content within the same hash
+// Gmail: hash-based routing
+window.addEventListener('hashchange', scheduleCheck);
+
+// Outlook: uses History API (pushState / replaceState) — detect via popstate
+window.addEventListener('popstate', scheduleCheck);
+
+// Both: catch framework-driven URL changes and lazy-loaded content
+let lastHref = location.href;
 const observer = new MutationObserver(() => {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(checkForEmailChange, 1200);
+  if (location.href !== lastHref) {
+    lastHref = location.href;
+    scheduleCheck();
+  } else {
+    scheduleCheck();
+  }
 });
-
 observer.observe(document.body, { childList: true, subtree: true });
 
-// Initial check when the content script first loads
+// Initial check after the page has had time to render
 setTimeout(checkForEmailChange, 2000);
