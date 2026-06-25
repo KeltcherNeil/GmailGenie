@@ -174,9 +174,18 @@ function checkForEmailChange() {
   });
 }
 
+// ── Extension validity guard ──────────────────────────────────────────────────
+// After the extension is reloaded, the old content script becomes "invalidated"
+// and all chrome.* calls throw. This guard detects that and shuts down cleanly.
+
+function isExtensionValid() {
+  try { return !!chrome.runtime?.id; } catch { return false; }
+}
+
 // ── Navigation detection ──────────────────────────────────────────────────────
 
 function scheduleCheck() {
+  if (!isExtensionValid()) { observer.disconnect(); return; }
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(checkForEmailChange, 1200);
 }
