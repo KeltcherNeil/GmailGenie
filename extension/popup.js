@@ -164,8 +164,18 @@ function renderIdle() {
     <div class="empty-view">
       <div class="empty-icon">&#128140;</div>
       <p>Open an email in Gmail to detect scheduling information.</p>
+      <button id="scan-now-btn" class="btn secondary scan-btn">&#128269; Scan current email</button>
     </div>
   `;
+
+  document.getElementById('scan-now-btn').addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return;
+    chrome.tabs.sendMessage(tab.id, { type: 'SCAN_NOW' }, () => {
+      void chrome.runtime.lastError; // silently ignore if content script not ready
+    });
+    renderProcessing();
+  });
 }
 
 function renderError(msg) {

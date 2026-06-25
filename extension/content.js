@@ -37,8 +37,12 @@ function getGmailBodyEl() {
   const selectors = ['.a3s.aiL', '.a3s', '.ii.gt .a3s', '.gs .a3s', '.adn.ads .a3s'];
   for (const sel of selectors) {
     const el = document.querySelector(sel);
-    if (el && el.innerText.trim().length > 10) return el;
+    if (el && el.innerText.trim().length > 10) {
+      console.log('[GmailGenie] body found via selector:', sel);
+      return el;
+    }
   }
+  console.log('[GmailGenie] no body element found — tried:', selectors.join(', '));
   return null;
 }
 
@@ -145,6 +149,7 @@ function getCurrentEmailContent() {
 
 function checkForEmailChange() {
   const currentId = getCurrentEmailId();
+  console.log('[GmailGenie] check — platform:', PLATFORM, 'id:', currentId, 'last:', lastEmailId);
 
   if (!currentId) {
     // Not in an email view — reset so the popup shows idle state
@@ -193,6 +198,16 @@ const observer = new MutationObserver(() => {
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });
+
+// Allow the popup to manually trigger a scan (bypasses debounce + resets lastEmailId)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'SCAN_NOW') {
+    console.log('[GmailGenie] manual scan triggered');
+    clearTimeout(debounceTimer);
+    lastEmailId = null; // force re-detection even if same email
+    checkForEmailChange();
+  }
+});
 
 // Initial check after the page has had time to render
 setTimeout(checkForEmailChange, 2000);
