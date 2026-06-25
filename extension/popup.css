@@ -278,4 +278,59 @@ main {
   line-height: 1.4;
 }
 
+/* ── Notification mode radio group ───────────────────────────────────────── */
+.notif-group { margin-bottom: 4px; }
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e8eaed;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.radio-option:hover { background: #f8f9fa; }
+
+.radio-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: #1a73e8;
+  flex-shrink: 0;
+}
+
+.radio-option input[type="radio"]:checked ~ .radio-content .radio-title {
+  color: #1a73e8;
+}
+
+.radio-option:has(input:checked) {
+  border-color: #1a73e8;
+  background: #f0f6ff;
+}
+
+.radio-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.radio-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #202124;
+}
+
+.radio-desc {
+  font-size: 11px;
+  color: #80868b;
+}
+
 .hidden { display: none !important; }

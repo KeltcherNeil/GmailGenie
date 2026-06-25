@@ -101,6 +101,15 @@ async function handleEmailOpened(emailData) {
 
     if (currentJobId === jobId) {
       await chrome.storage.local.set({ status: 'done', event, error: null });
+
+      // Badge mode — put a green dot on the icon to signal an event was found
+      if (event.event_found) {
+        const { notificationMode = 'none' } = await chrome.storage.local.get('notificationMode');
+        if (notificationMode === 'badge') {
+          chrome.action.setBadgeText({ text: '!' });
+          chrome.action.setBadgeBackgroundColor({ color: '#188038' });
+        }
+      }
     }
   } catch (err) {
     if (currentJobId === jobId) {

@@ -32,6 +32,33 @@
       />
       <p class="hint">Stored locally. Never sent anywhere except api.anthropic.com.</p>
     </div>
+    <div class="form-group notif-group">
+      <label>When an event is detected</label>
+      <div class="radio-group">
+        <label class="radio-option">
+          <input type="radio" name="notif-mode" value="none" />
+          <span class="radio-content">
+            <span class="radio-title">None</span>
+            <span class="radio-desc">Only shows when you open the popup</span>
+          </span>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="notif-mode" value="badge" />
+          <span class="radio-content">
+            <span class="radio-title">Badge on icon</span>
+            <span class="radio-desc">Green badge appears on the toolbar icon</span>
+          </span>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="notif-mode" value="card" />
+          <span class="radio-content">
+            <span class="radio-title">Floating card</span>
+            <span class="radio-desc">Card pops up inside Gmail or Outlook</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
     <div class="button-row">
       <button id="save-key-btn" class="btn primary">Save</button>
       <button id="cancel-settings-btn" class="btn secondary">Cancel</button>

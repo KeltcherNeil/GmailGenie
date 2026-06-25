@@ -208,6 +208,144 @@ const observer = new MutationObserver(() => {
 });
 observer.observe(document.body, { childList: true, subtree: true });
 
+// ── Floating card ─────────────────────────────────────────────────────────────
+
+const CARD_ID = 'gmailgenie-floating-card';
+
+function removeCard() {
+  document.getElementById(CARD_ID)?.remove();
+}
+
+function buildCalUrl(ev) {
+  if (!ev.date) return null;
+  const d = ev.date.replace(/-/g, '');
+  const t = ev.time ? ev.time.replace(':', '') + '00' : null;
+  const start = t ? `${d}T${t}` : d;
+  let end;
+  if (t) {
+    const mins = ev.duration_minutes || 60;
+    const [yr, mo, dy, hr, mn] = [
+      +ev.date.slice(0,4), +ev.date.slice(5,7)-1, +ev.date.slice(8,10),
+      +ev.time.slice(0,2), +ev.time.slice(3,5)
+    ];
+    const e = new Date(yr, mo, dy, hr, mn + mins);
+    const p = n => String(n).padStart(2,'0');
+    end = `${e.getFullYear()}${p(e.getMonth()+1)}${p(e.getDate())}T${p(e.getHours())}${p(e.getMinutes())}00`;
+  } else {
+    const nd = new Date(ev.date + 'T00:00:00');
+    nd.setDate(nd.getDate() + 1);
+    const p = n => String(n).padStart(2,'0');
+    end = `${nd.getFullYear()}${p(nd.getMonth()+1)}${p(nd.getDate())}`;
+  }
+  const params = new URLSearchParams({ action: 'TEMPLATE' });
+  params.set('text', ev.title || 'Event');
+  if (start && end) params.set('dates', `${start}/${end}`);
+  if (ev.location)    params.set('location', ev.location);
+  if (ev.description) params.set('details',  ev.description);
+  return `https://calendar.google.com/calendar/render?${params}`;
+}
+
+function fmtCardDate(ev) {
+  const parts = [];
+  if (ev.date) {
+    try {
+      parts.push(new Date(ev.date + 'T00:00:00').toLocaleDateString('en-US',
+        { weekday: 'short', month: 'short', day: 'numeric' }));
+    } catch { parts.push(ev.date); }
+  }
+  if (ev.time) {
+    const [h, m] = ev.time.split(':').map(Number);
+    parts.push(`${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`);
+  }
+  return parts.join(' · ');
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showEventCard(ev) {
+  removeCard();
+  const calUrl  = buildCalUrl(ev);
+  const dateStr = fmtCardDate(ev);
+
+  const card = document.createElement('div');
+  card.id = CARD_ID;
+  card.innerHTML = `
+    <style>
+      #gmailgenie-floating-card {
+        position: fixed; bottom: 24px; right: 24px; width: 300px;
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+        font-family: 'Google Sans', Roboto, Arial, sans-serif;
+        font-size: 14px; color: #202124;
+        z-index: 2147483647; border: 1px solid #e0e0e0; overflow: hidden;
+        animation: gg-in 0.25s ease;
+      }
+      @keyframes gg-in {
+        from { transform: translateY(16px); opacity: 0; }
+        to   { transform: translateY(0);    opacity: 1; }
+      }
+      #gmailgenie-floating-card .gg-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 14px; background: #1a73e8; color: #fff;
+      }
+      #gmailgenie-floating-card .gg-head-title {
+        font-size: 12px; font-weight: 600; letter-spacing: 0.2px;
+      }
+      #gmailgenie-floating-card .gg-x {
+        background: none; border: none; color: #fff; cursor: pointer;
+        font-size: 15px; opacity: 0.8; padding: 0; line-height: 1;
+      }
+      #gmailgenie-floating-card .gg-x:hover { opacity: 1; }
+      #gmailgenie-floating-card .gg-body { padding: 12px 14px; }
+      #gmailgenie-floating-card .gg-title {
+        font-weight: 600; font-size: 14px; margin-bottom: 8px; line-height: 1.3;
+      }
+      #gmailgenie-floating-card .gg-row {
+        display: flex; gap: 6px; font-size: 12px; color: #5f6368; margin-bottom: 3px;
+      }
+      #gmailgenie-floating-card .gg-btn {
+        display: block; width: 100%; margin-top: 12px; padding: 9px;
+        background: #188038; color: #fff; border: none; border-radius: 4px;
+        font-size: 13px; font-weight: 500; cursor: pointer;
+        font-family: inherit; text-align: center;
+      }
+      #gmailgenie-floating-card .gg-btn:hover { background: #0d6b2e; }
+    </style>
+    <div class="gg-head">
+      <span class="gg-head-title">&#128197; GmailGenie detected an event</span>
+      <button class="gg-x" id="gg-close">&#10005;</button>
+    </div>
+    <div class="gg-body">
+      <div class="gg-title">${esc(ev.title || 'Untitled Event')}</div>
+      ${dateStr    ? `<div class="gg-row"><span>&#128197;</span><span>${esc(dateStr)}</span></div>` : ''}
+      ${ev.location? `<div class="gg-row"><span>&#128205;</span><span>${esc(ev.location)}</span></div>` : ''}
+      ${calUrl     ? `<button class="gg-btn" id="gg-cal">&#10133; Add to Google Calendar</button>` : ''}
+    </div>
+  `;
+  document.body.appendChild(card);
+  document.getElementById('gg-close').addEventListener('click', removeCard);
+  document.getElementById('gg-cal')?.addEventListener('click', () => {
+    window.open(calUrl, '_blank');
+    removeCard();
+  });
+}
+
+// Watch storage — show or remove card based on current mode
+chrome.storage.onChanged.addListener((_, area) => {
+  if (area !== 'local') return;
+  chrome.storage.local.get(['status', 'event', 'notificationMode'], (data) => {
+    if (data.status === 'done' && data.event?.event_found && data.notificationMode === 'card') {
+      showEventCard(data.event);
+    } else if (data.status === 'idle') {
+      removeCard();
+    }
+  });
+});
+
+// ── Manual scan (from popup "Scan current email" button) ──────────────────────
+
 // Allow the popup to manually trigger a scan (bypasses debounce + resets lastEmailId)
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'SCAN_NOW') {

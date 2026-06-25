@@ -13,7 +13,7 @@ const apiKeyInput    = document.getElementById('api-key-input');
 
 async function init() {
   const data = await chrome.storage.local.get([
-    'status', 'event', 'error', 'apiKey', 'emailData'
+    'status', 'event', 'error', 'apiKey', 'emailData', 'notificationMode'
   ]);
   currentState = data;
   render(data);
@@ -23,6 +23,14 @@ async function init() {
     apiKeyInput.value = '••••••••••••••••••••••';
     apiKeyInput.placeholder = 'Enter new key to replace';
   }
+
+  // Set the saved notification mode radio
+  const savedMode = data.notificationMode || 'none';
+  const activeRadio = document.querySelector(`input[name="notif-mode"][value="${savedMode}"]`);
+  if (activeRadio) activeRadio.checked = true;
+
+  // Clear badge whenever the popup is opened
+  chrome.action.setBadgeText({ text: '' });
 }
 
 // Live-update while the popup is open (e.g. background finishes processing)
@@ -232,6 +240,13 @@ async function saveApiKey(key) {
   apiKeyInput.value = '••••••••••••••••••••••';
   await init();
 }
+
+// Save notification mode preference immediately on change
+document.querySelectorAll('input[name="notif-mode"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    chrome.storage.local.set({ notificationMode: e.target.value });
+  });
+});
 
 // ── Google Calendar deeplink ─────────────────────────────────────────────────
 
