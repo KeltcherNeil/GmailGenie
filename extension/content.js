@@ -350,7 +350,9 @@ function showEventCard(ev) {
   document.body.appendChild(card);
   document.getElementById('gg-close').addEventListener('click', removeCard);
   document.getElementById('gg-cal')?.addEventListener('click', () => {
-    window.open(calUrl, '_blank');
+    // Route through background.js so it can track the calendar tab and
+    // switch the user back to Gmail automatically after the event is saved
+    chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
     removeCard();
   });
 }

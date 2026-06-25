@@ -250,7 +250,7 @@ document.querySelectorAll('input[name="notif-mode"]').forEach(radio => {
 
 // ── Google Calendar deeplink ─────────────────────────────────────────────────
 
-function openGoogleCalendar(event) {
+async function openGoogleCalendar(event) {
   let dateParam = '';
 
   if (event.date) {
@@ -269,13 +269,16 @@ function openGoogleCalendar(event) {
 
   const params = new URLSearchParams({ action: 'TEMPLATE' });
   params.set('text', event.title || 'Event from GmailGenie');
-  if (dateParam)       params.set('dates',    dateParam);
-  if (event.location)  params.set('location', event.location);
-  if (event.description) params.set('details', event.description);
+  if (dateParam)         params.set('dates',    dateParam);
+  if (event.location)    params.set('location', event.location);
+  if (event.description) params.set('details',  event.description);
 
-  chrome.tabs.create({
-    url: `https://calendar.google.com/calendar/render?${params.toString()}`
-  });
+  const calUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
+
+  // Store the Gmail tab ID so background.js can switch back after the event is saved
+  const [sourceTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const calTab = await chrome.tabs.create({ url: calUrl });
+  chrome.storage.local.set({ calSourceTabId: sourceTab?.id, calTabId: calTab.id });
 }
 
 // "2024-03-15", "14:00" → "20240315T140000"

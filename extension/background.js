@@ -122,10 +122,45 @@ async function handleEmailOpened(emailData) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'EMAIL_OPENED') {
     handleEmailOpened(message.payload);
+  } else if (message.type === 'OPEN_CALENDAR') {
+    // Floating card routes here so we can track the calendar tab
+    openCalendarTab(message.url, sender.tab?.id);
   }
-  // Return false — we don't use sendResponse
   return false;
+});
+
+async function openCalendarTab(url, sourceTabId) {
+  const calTab = await chrome.tabs.create({ url });
+  chrome.storage.local.set({ calSourceTabId: sourceTabId, calTabId: calTab.id });
+}
+
+// ── Auto-return after calendar save ──────────────────────────────────────────
+// When the user saves an event, Google Calendar redirects from the
+// /render?action=TEMPLATE page to the main /r/ calendar view.
+// We detect that redirect, switch focus back to the Gmail/Outlook tab,
+// and close the Calendar tab.
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete' || !tab.url) return;
+  if (!tab.url.includes('calendar.google.com')) return;
+
+  const { calTabId, calSourceTabId } = await chrome.storage.local.get([
+    'calTabId', 'calSourceTabId'
+  ]);
+
+  if (tabId !== calTabId) return;
+
+  // Still on the template form or the "more options" edit form — not saved yet
+  if (tab.url.includes('action=TEMPLATE')) return;
+  if (tab.url.includes('action=EDIT') || tab.url.includes('eventedit')) return;
+
+  // Landed on the main calendar view (/calendar/r...) — event was saved
+  if (calSourceTabId) {
+    chrome.tabs.update(calSourceTabId, { active: true }).catch(() => {});
+  }
+  chrome.tabs.remove(tabId);
+  chrome.storage.local.remove(['calTabId', 'calSourceTabId']);
 });
