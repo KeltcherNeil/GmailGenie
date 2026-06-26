@@ -150,8 +150,10 @@ function isCalendarHomeUrl(url) {
   try {
     const u = new URL(url);
     if (u.hostname !== 'calendar.google.com') return false;
-    // Must be under /calendar/r (the SPA calendar view)
-    if (!/^\/calendar\/r(\/|$)/.test(u.pathname)) return false;
+    // Must be under the SPA calendar view. Google prefixes the path with an
+    // account segment when you're signed in, e.g. /calendar/u/0/r/week/...,
+    // so allow an optional /u/<n>/ before /r.
+    if (!/^\/calendar\/(u\/\d+\/)?r(\/|$)/.test(u.pathname)) return false;
     // Must NOT be an editing or template page
     if (u.pathname.includes('eventedit')) return false;
     if (u.searchParams.has('action')) return false;
@@ -160,8 +162,12 @@ function isCalendarHomeUrl(url) {
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Only act once the tab has fully loaded and we have a URL
-  if (changeInfo.status !== 'complete' || !tab.url) return;
+  // React both to full page loads (status === 'complete') and to client-side
+  // SPA navigations (changeInfo.url). Google Calendar swaps to the main view
+  // after saving via history.pushState, which only fires changeInfo.url —
+  // gating solely on 'complete' would miss the save.
+  if (changeInfo.status !== 'complete' && !changeInfo.url) return;
+  if (!tab.url) return;
 
   const { calTabId, calSourceTabId } = await chrome.storage.local.get([
     'calTabId', 'calSourceTabId'
