@@ -150,8 +150,9 @@ function isCalendarHomeUrl(url) {
   try {
     const u = new URL(url);
     if (u.hostname !== 'calendar.google.com') return false;
-    // Must be under /calendar/r (the SPA calendar view)
-    if (!/^\/calendar\/r(\/|$)/.test(u.pathname)) return false;
+    // Must be under the SPA calendar view. Google includes an optional account
+    // segment, so the path looks like /calendar/r OR /calendar/u/0/r etc.
+    if (!/^\/calendar\/(u\/\d+\/)?r(\/|$)/.test(u.pathname)) return false;
     // Must NOT be an editing or template page
     if (u.pathname.includes('eventedit')) return false;
     if (u.searchParams.has('action')) return false;
@@ -160,8 +161,12 @@ function isCalendarHomeUrl(url) {
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Only act once the tab has fully loaded and we have a URL
-  if (changeInfo.status !== 'complete' || !tab.url) return;
+  // Google Calendar is a single-page app: after the event is saved it navigates
+  // from /render?action=TEMPLATE to the main calendar view via the History API,
+  // which fires onUpdated with changeInfo.url but NOT another status:'complete'.
+  // So react to in-page URL changes as well as full page loads.
+  const url = changeInfo.url || (changeInfo.status === 'complete' ? tab.url : null);
+  if (!url) return;
 
   const { calTabId, calSourceTabId } = await chrome.storage.local.get([
     'calTabId', 'calSourceTabId'
@@ -173,7 +178,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // that the event was saved and all redirects are complete. Firing on any
   // earlier URL causes the "Leave site?" dialog because Chrome detects the
   // form is still active during intermediate redirects.
-  if (!isCalendarHomeUrl(tab.url)) return;
+  if (!isCalendarHomeUrl(url)) return;
 
   if (calSourceTabId) {
     chrome.tabs.update(calSourceTabId, { active: true }).catch(() => {});
