@@ -158,6 +158,11 @@ function getCurrentEmailContent() {
 }
 
 function checkForEmailChange() {
+  // The extension may have been reloaded/updated while this tab stayed open,
+  // orphaning this content script. Any chrome.* call would throw
+  // "Extension context invalidated" — bail out and stop observing instead.
+  if (!isExtensionValid()) { observer.disconnect(); return; }
+
   const currentId = getCurrentEmailId();
   console.log('[GmailGenie] check — platform:', PLATFORM, 'id:', currentId, 'last:', lastEmailId);
 
@@ -177,11 +182,16 @@ function checkForEmailChange() {
 
   lastEmailId = currentId;
 
-  chrome.runtime.sendMessage({ type: 'EMAIL_OPENED', payload: emailData }, () => {
-    // chrome.runtime.lastError just means the service worker was sleeping;
-    // Chrome wakes it on the next message, so silently ignore.
-    void chrome.runtime.lastError;
-  });
+  try {
+    chrome.runtime.sendMessage({ type: 'EMAIL_OPENED', payload: emailData }, () => {
+      // chrome.runtime.lastError just means the service worker was sleeping;
+      // Chrome wakes it on the next message, so silently ignore.
+      void chrome.runtime.lastError;
+    });
+  } catch {
+    // Context invalidated between the guard and the send — stop observing.
+    observer.disconnect();
+  }
 }
 
 // ── Extension validity guard ──────────────────────────────────────────────────
@@ -352,8 +362,16 @@ function showEventCard(ev) {
   document.getElementById('gg-cal')?.addEventListener('click', () => {
     // Route through background.js so it can track the calendar tab and
     // switch the user back to Gmail automatically after the event is saved
-    chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
-    removeCard();
+    if (!isExtensionValid()) {
+      alert('GmailGenie was updated — please reload this Gmail tab, then try again.');
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
+      removeCard();
+    } catch {
+      alert('GmailGenie was updated — please reload this Gmail tab, then try again.');
+    }
   });
 }
 
