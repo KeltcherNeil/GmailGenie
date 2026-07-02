@@ -275,10 +275,18 @@ async function openGoogleCalendar(event) {
 
   const calUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
 
-  // Store the Gmail tab ID so background.js can switch back after the event is saved
+  // Route through the background service worker so it opens the tab AND records
+  // the tracking IDs (calSourceTabId / calTabId) that auto-return depends on.
+  //
+  // Opening the tab here in the popup was unreliable: creating a new tab shifts
+  // focus and closes the popup, destroying its JS context before the
+  // fire-and-forget chrome.storage.local.set() could persist calTabId. With no
+  // calTabId stored, background.js's onUpdated listener never matched the
+  // calendar tab, so it never closed it or switched back after saving.
+  //
+  // The popup has no sender.tab, so pass the source (Gmail/Outlook) tab id along.
   const [sourceTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const calTab = await chrome.tabs.create({ url: calUrl });
-  chrome.storage.local.set({ calSourceTabId: sourceTab?.id, calTabId: calTab.id });
+  chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl, sourceTabId: sourceTab?.id });
 }
 
 // "2024-03-15", "14:00" → "20240315T140000"

@@ -188,7 +188,7 @@ tests/test_emails/has_event/email_001_expected.json  # expected extraction outpu
 
 ### 1. Calendar tab does not auto-close / return to email after saving
 
-**Status:** Open — the intended behaviour is implemented but not working reliably in practice.
+**Status:** ✅ Fixed — see "Root cause & fix" below. Kept here for context.
 
 **What should happen (desired behaviour):**
 1. User clicks **Add to Google Calendar** (popup) or the floating card's calendar button.
@@ -248,11 +248,29 @@ client-side SPA navigations (`changeInfo.url` in addition to `status === 'comple
 4. Observe: the event is created, but the calendar tab remains open and focus does not return
    to the Gmail tab.
 
-**Suggested next step for whoever picks this up:**
-Instrument the `chrome.tabs.onUpdated` listener to log every `tab.url` seen for the tracked
-`calTabId` after a save, and confirm what URL Google Calendar actually lands on. That will
-show whether the failure is in URL detection (`isCalendarHomeUrl`), in lost tab-tracking
-state, or in the save producing no observable navigation.
+**Root cause & fix:**
+The failure was **lost tab-tracking state**, specifically a race in the popup path. When the
+user clicked **Add to Google Calendar**, `popup.js` opened the calendar tab itself with
+`chrome.tabs.create()` and then recorded the tracking IDs with a fire-and-forget
+`chrome.storage.local.set({ calSourceTabId, calTabId })`. Opening a new tab shifts focus away
+from the popup, which **closes the popup and destroys its JS context** — often before that
+async storage write completed. With `calTabId` never persisted, the `chrome.tabs.onUpdated`
+listener in `background.js` could never match the calendar tab (`tabId !== calTabId`), so it
+never closed the tab or switched back. (The floating-card path in `content.js` was unaffected
+because it already routed through the always-alive background worker.)
+
+The fix routes the popup path through the background service worker too:
+- `popup.js` → `openGoogleCalendar()` now sends
+  `{ type: 'OPEN_CALENDAR', url, sourceTabId }` instead of creating the tab itself. It passes
+  `sourceTabId` explicitly because a popup has no `sender.tab`.
+- `background.js` → the `OPEN_CALENDAR` handler uses `message.sourceTabId ?? sender.tab?.id`,
+  so both the popup and the floating card work.
+- `background.js` → `openCalendarTab()` now **awaits** the `chrome.storage.local.set()` so the
+  tracking IDs are guaranteed persisted before the user can save.
+
+Because the background worker stays alive across the tab creation, the storage write always
+completes, so the auto-return listener reliably matches the calendar tab and closes it /
+returns focus after the save lands on the main calendar view.
 
 ---
 

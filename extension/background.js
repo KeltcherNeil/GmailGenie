@@ -126,15 +126,19 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'EMAIL_OPENED') {
     handleEmailOpened(message.payload);
   } else if (message.type === 'OPEN_CALENDAR') {
-    // Floating card routes here so we can track the calendar tab
-    openCalendarTab(message.url, sender.tab?.id);
+    // Both the floating card (content script) and the popup route here so we can
+    // track the calendar tab. Content scripts carry sender.tab; the popup does
+    // not, so it passes sourceTabId explicitly in the message.
+    openCalendarTab(message.url, message.sourceTabId ?? sender.tab?.id);
   }
   return false;
 });
 
 async function openCalendarTab(url, sourceTabId) {
   const calTab = await chrome.tabs.create({ url });
-  chrome.storage.local.set({ calSourceTabId: sourceTabId, calTabId: calTab.id });
+  // Await the write: the auto-return listener can only match the calendar tab
+  // once calTabId is persisted, and the user may save the event quickly.
+  await chrome.storage.local.set({ calSourceTabId: sourceTabId, calTabId: calTab.id });
 }
 
 // ── Auto-return after calendar save ──────────────────────────────────────────
