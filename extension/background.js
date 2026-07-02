@@ -1,5 +1,8 @@
 // background.js — Service worker: calls Claude API and stores extracted event
 
+// DIAGNOSTIC: confirms the reloaded worker is running THIS build.
+console.log('[GmailGenie] background service worker loaded (auto-return debug build)');
+
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
 // claude-haiku is fast and cheap — ideal for extraction
@@ -139,6 +142,7 @@ async function openCalendarTab(url, sourceTabId) {
   // Await the write: the auto-return listener can only match the calendar tab
   // once calTabId is persisted, and the user may save the event quickly.
   await chrome.storage.local.set({ calSourceTabId: sourceTabId, calTabId: calTab.id });
+  console.log('[GmailGenie] calendar tab opened & tracked', { calTabId: calTab.id, calSourceTabId: sourceTabId });
 }
 
 // ── Auto-return after calendar save ──────────────────────────────────────────
@@ -165,29 +169,48 @@ function isCalendarHomeUrl(url) {
   } catch { return false; }
 }
 
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // React both to full page loads (status === 'complete') and to client-side
-  // SPA navigations (changeInfo.url). Google Calendar swaps to the main view
-  // after saving via history.pushState, which only fires changeInfo.url —
-  // gating solely on 'complete' would miss the save.
-  if (changeInfo.status !== 'complete' && !changeInfo.url) return;
-  if (!tab.url) return;
-
+// Shared handler: decides whether a navigation on the tracked calendar tab means
+// the event was saved (landed on the main calendar view) and, if so, returns to
+// the source tab and closes the calendar tab. Idempotent — clearing the tracking
+// IDs makes any duplicate event from another source a no-op.
+async function maybeAutoReturn(tabId, url, source) {
   const { calTabId, calSourceTabId } = await chrome.storage.local.get([
     'calTabId', 'calSourceTabId'
   ]);
 
   if (tabId !== calTabId) return;
 
-  // Wait until we're on the main calendar home — this is the definitive signal
-  // that the event was saved and all redirects are complete. Firing on any
-  // earlier URL causes the "Leave site?" dialog because Chrome detects the
-  // form is still active during intermediate redirects.
-  if (!isCalendarHomeUrl(tab.url)) return;
+  const home = url ? isCalendarHomeUrl(url) : false;
+  // DIAGNOSTIC: every navigation seen on the tracked calendar tab, and how it
+  // was classified. This is the key line for diagnosing why the tab won't close.
+  console.log('[GmailGenie] cal-tab nav', { source, url, isCalendarHome: home });
 
+  // Wait until we're on the main calendar home — the definitive "saved" signal.
+  // Firing on an earlier/edit URL causes a "Leave site?" dialog because the form
+  // is still active during intermediate redirects.
+  if (!home) return;
+
+  console.log('[GmailGenie] auto-return firing → focus', calSourceTabId, 'close', tabId);
   if (calSourceTabId) {
     chrome.tabs.update(calSourceTabId, { active: true }).catch(() => {});
   }
-  chrome.tabs.remove(tabId);
+  chrome.tabs.remove(tabId).catch(() => {});
   chrome.storage.local.remove(['calTabId', 'calSourceTabId']);
+}
+
+// Path 1 — classic tab updates (full loads + some SPA URL changes).
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete' && !changeInfo.url) return;
+  if (!tab.url) return;
+  maybeAutoReturn(tabId, tab.url, 'tabs.onUpdated');
 });
+
+// Path 2 — webNavigation catches Google Calendar's history.pushState transition
+// after saving, which tabs.onUpdated can miss. This is the more reliable signal.
+const CAL_FILTER = { url: [{ hostEquals: 'calendar.google.com' }] };
+chrome.webNavigation.onHistoryStateUpdated.addListener((d) => {
+  maybeAutoReturn(d.tabId, d.url, 'webNavigation.onHistoryStateUpdated');
+}, CAL_FILTER);
+chrome.webNavigation.onCompleted.addListener((d) => {
+  maybeAutoReturn(d.tabId, d.url, 'webNavigation.onCompleted');
+}, CAL_FILTER);
