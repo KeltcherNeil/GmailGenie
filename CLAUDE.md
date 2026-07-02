@@ -184,6 +184,78 @@ tests/test_emails/has_event/email_001_expected.json  # expected extraction outpu
 
 ---
 
+## Problems (Active Issues)
+
+### 1. Calendar tab does not auto-close / return to email after saving
+
+**Status:** Open — the intended behaviour is implemented but not working reliably in practice.
+
+**What should happen (desired behaviour):**
+1. User clicks **Add to Google Calendar** (popup) or the floating card's calendar button.
+2. A new tab opens on Google Calendar's event-template page (`/calendar/render?action=TEMPLATE&...`).
+3. User clicks **Save** in Google Calendar and the event is created successfully.
+4. **The calendar tab should automatically close**, and focus should return to the
+   original Gmail (or Outlook) tab the user came from.
+
+**What actually happens:**
+- Steps 1–3 work: the event is created correctly in Google Calendar.
+- Step 4 fails: the calendar tab stays open, and the user is left sitting on the Google
+  Calendar view instead of being returned to their email. They have to manually close the
+  tab and switch back.
+
+**Where this logic lives:**
+- `extension/popup.js` → `openGoogleCalendar(event)` — opens the calendar tab and stores
+  `calSourceTabId` (the Gmail tab to return to) and `calTabId` (the calendar tab to close)
+  in `chrome.storage.local`.
+- `extension/content.js` (~line 353) → floating card sends an `OPEN_CALENDAR` message to the
+  background worker instead of opening the tab itself.
+- `extension/background.js` → `openCalendarTab(url, sourceTabId)` — the message-based path
+  that also records `calSourceTabId` / `calTabId`.
+- `extension/background.js` → `chrome.tabs.onUpdated` listener (~line 164) — the auto-return
+  detector. It watches the tracked calendar tab and, once `isCalendarHomeUrl(tab.url)`
+  returns true, focuses `calSourceTabId` and calls `chrome.tabs.remove()` on the calendar tab.
+- `extension/background.js` → `isCalendarHomeUrl(url)` (~line 149) — decides whether the
+  calendar tab has "landed" on the main calendar view after a save.
+
+**How the current design is supposed to detect a save:**
+After saving, Google Calendar navigates the tab away from the `?action=TEMPLATE` template
+page back to the main calendar view (e.g. `/calendar/u/0/r/week/...`). The extension treats
+"navigated to the main calendar home URL" as the signal that the save completed, then closes
+the tab and returns focus. The most recent commit ("Fix auto-return: handle account-prefixed
+URLs and SPA navigation") added handling for the `/u/<n>/` account prefix and for
+client-side SPA navigations (`changeInfo.url` in addition to `status === 'complete'`).
+
+**Why it may still be failing (observations — not yet verified):**
+- **The post-save URL may not match `isCalendarHomeUrl`.** Google Calendar may redirect to a
+  URL shape the regex `^\/calendar\/(u\/\d+\/)?r(\/|$)/` doesn't cover (e.g. an `eventedit`
+  view, an `/eventedit/`/`/r/eventedit` intermediate, a lingering `action`/other query param,
+  a different host locale, or a "saved" confirmation view), so the listener never fires.
+- **The tab-tracking IDs may be lost.** The MV3 service worker (`background.js`) can be torn
+  down between opening the calendar tab and the save completing. If it restarts, in-memory
+  state is gone — this design stores the IDs in `chrome.storage.local` so they should survive,
+  but the `chrome.tabs.onUpdated` listener must be re-registered on wake-up for the event to
+  be caught at all.
+- **The save may not trigger a tracked navigation.** If Google Calendar saves via a
+  background XHR/fetch and updates the view without a URL change the listener can see, neither
+  `status === 'complete'` nor `changeInfo.url` fires for the tracked tab.
+- **Source-tab focus vs. tab-close are coupled.** Both happen only inside the
+  `isCalendarHomeUrl` branch, so if detection fails, neither the close nor the return occurs.
+
+**How to reproduce:**
+1. Open an email in Gmail that contains a clear event.
+2. In the GmailGenie popup, click **Add to Google Calendar**.
+3. In the calendar tab that opens, click **Save**.
+4. Observe: the event is created, but the calendar tab remains open and focus does not return
+   to the Gmail tab.
+
+**Suggested next step for whoever picks this up:**
+Instrument the `chrome.tabs.onUpdated` listener to log every `tab.url` seen for the tracked
+`calTabId` after a save, and confirm what URL Google Calendar actually lands on. That will
+show whether the failure is in URL detection (`isCalendarHomeUrl`), in lost tab-tracking
+state, or in the save producing no observable navigation.
+
+---
+
 ## Known Limitations & Gotchas
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
