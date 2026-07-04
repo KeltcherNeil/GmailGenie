@@ -202,14 +202,23 @@ async function maybeAutoReturn(tabId, url, source) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
+      // MAIN world: run in the page's own JS context so our capture-phase
+      // listener can actually stop Google Calendar's page-level beforeunload
+      // handler. In the default ISOLATED world our listener can't block it.
+      world: 'MAIN',
       func: () => {
-        window.addEventListener('beforeunload', (e) => {
+        const stop = (e) => {
           e.stopImmediatePropagation();
+          e.stopPropagation();
           delete e.returnValue;
-        }, true);
+        };
+        // Capture phase runs before Google's target/bubble handler, so
+        // stopImmediatePropagation prevents theirs from arming the dialog.
+        window.addEventListener('beforeunload', stop, true);
+        try { window.onbeforeunload = null; } catch (_) {}
       },
     });
-    console.log('[GmailGenie] beforeunload guard suppressed on cal tab');
+    console.log('[GmailGenie] beforeunload guard suppressed on cal tab (MAIN world)');
   } catch (err) {
     console.log('[GmailGenie] beforeunload suppress failed (closing anyway):', err.message);
   }
