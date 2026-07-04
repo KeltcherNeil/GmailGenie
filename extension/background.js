@@ -186,16 +186,38 @@ async function maybeAutoReturn(tabId, url, source) {
   console.log('[GmailGenie] cal-tab nav', { source, url, isCalendarHome: home });
 
   // Wait until we're on the main calendar home — the definitive "saved" signal.
-  // Firing on an earlier/edit URL causes a "Leave site?" dialog because the form
-  // is still active during intermediate redirects.
   if (!home) return;
 
+  // Clear tracking first so the other navigation sources (three listeners fire
+  // for the same save) don't double-run this close sequence.
+  await chrome.storage.local.remove(['calTabId', 'calSourceTabId']);
+
   console.log('[GmailGenie] auto-return firing → focus', calSourceTabId, 'close', tabId);
+
+  // The event is already saved, but Google Calendar leaves a "beforeunload"
+  // guard armed for a moment during the save transition. Closing the tab would
+  // trigger the "Leave site? Changes you made may not be saved" dialog. Inject a
+  // capture-phase beforeunload listener that stops that guard from running, so
+  // the tab closes silently with no prompt.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        window.addEventListener('beforeunload', (e) => {
+          e.stopImmediatePropagation();
+          delete e.returnValue;
+        }, true);
+      },
+    });
+    console.log('[GmailGenie] beforeunload guard suppressed on cal tab');
+  } catch (err) {
+    console.log('[GmailGenie] beforeunload suppress failed (closing anyway):', err.message);
+  }
+
   if (calSourceTabId) {
     chrome.tabs.update(calSourceTabId, { active: true }).catch(() => {});
   }
   chrome.tabs.remove(tabId).catch(() => {});
-  chrome.storage.local.remove(['calTabId', 'calSourceTabId']);
 }
 
 // Path 1 — classic tab updates (full loads + some SPA URL changes).

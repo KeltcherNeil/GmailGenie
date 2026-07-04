@@ -3,12 +3,13 @@
   "name": "GmailGenie",
   "version": "0.2.0",
   "description": "Detects scheduling info in Gmail and Outlook emails and suggests Google Calendar events.",
-  "permissions": ["storage", "tabs", "webNavigation"],
+  "permissions": ["storage", "tabs", "webNavigation", "scripting"],
   "host_permissions": [
     "https://mail.google.com/*",
     "https://outlook.live.com/*",
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
+    "https://calendar.google.com/*",
     "https://api.anthropic.com/*"
   ],
   "background": {
