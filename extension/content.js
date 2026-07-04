@@ -292,54 +292,116 @@ function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// Confidence as 0–100. Prefer the numeric model score, else map high/medium/low.
+function cardConfidencePercent(ev) {
+  const raw = ev.confidence_score;
+  if (typeof raw === 'number' && isFinite(raw)) {
+    return Math.max(0, Math.min(100, Math.round(raw)));
+  }
+  return ({ high: 92, medium: 66, low: 34 })[ev.confidence] ?? 66;
+}
+
 function showEventCard(ev) {
   removeCard();
   const calUrl  = buildCalUrl(ev);
   const dateStr = fmtCardDate(ev);
+
+  const pct   = cardConfidencePercent(ev);
+  const level = pct >= 80 ? 'high' : pct >= 50 ? 'medium' : 'low';
 
   const card = document.createElement('div');
   card.id = CARD_ID;
   card.innerHTML = `
     <style>
       #gmailgenie-floating-card {
-        position: fixed; bottom: 24px; right: 24px; width: 300px;
-        background: #fff; border-radius: 12px;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.18);
-        font-family: 'Google Sans', Roboto, Arial, sans-serif;
-        font-size: 14px; color: #202124;
-        z-index: 2147483647; border: 1px solid #e0e0e0; overflow: hidden;
-        animation: gg-in 0.25s ease;
+        position: fixed; bottom: 24px; right: 24px; width: 312px;
+        background: #fff; border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(24,28,40,0.22);
+        font-family: 'Google Sans', Roboto, -apple-system, Arial, sans-serif;
+        font-size: 14px; color: #1f2430;
+        z-index: 2147483647; border: 1px solid #eef0f4; overflow: hidden;
+        animation: gg-in 0.28s cubic-bezier(0.22,1,0.36,1);
       }
       @keyframes gg-in {
         from { transform: translateY(16px); opacity: 0; }
         to   { transform: translateY(0);    opacity: 1; }
       }
+      @keyframes gg-fill { from { width: 0; } }
       #gmailgenie-floating-card .gg-head {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px; background: #1a73e8; color: #fff;
+        padding: 13px 16px; color: #fff; position: relative; overflow: hidden;
+        background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+      }
+      #gmailgenie-floating-card .gg-head::after {
+        content: ""; position: absolute; top: -70%; right: -10%;
+        width: 140px; height: 140px; pointer-events: none;
+        background: radial-gradient(circle, rgba(255,255,255,0.22), transparent 60%);
       }
       #gmailgenie-floating-card .gg-head-title {
-        font-size: 12px; font-weight: 600; letter-spacing: 0.2px;
+        font-size: 12.5px; font-weight: 600; letter-spacing: 0.2px; z-index: 1;
       }
       #gmailgenie-floating-card .gg-x {
         background: none; border: none; color: #fff; cursor: pointer;
-        font-size: 15px; opacity: 0.8; padding: 0; line-height: 1;
+        font-size: 15px; opacity: 0.85; padding: 0; line-height: 1; z-index: 1;
       }
       #gmailgenie-floating-card .gg-x:hover { opacity: 1; }
-      #gmailgenie-floating-card .gg-body { padding: 12px 14px; }
+      #gmailgenie-floating-card .gg-body { padding: 14px 16px 16px; }
       #gmailgenie-floating-card .gg-title {
-        font-weight: 600; font-size: 14px; margin-bottom: 8px; line-height: 1.3;
+        font-weight: 600; font-size: 15px; margin-bottom: 12px; line-height: 1.3;
       }
+      #gmailgenie-floating-card .gg-conf { margin-bottom: 14px; }
+      #gmailgenie-floating-card .gg-conf-head {
+        display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px;
+      }
+      #gmailgenie-floating-card .gg-conf-label {
+        font-size: 10px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.6px; color: #9aa2b1;
+      }
+      #gmailgenie-floating-card .gg-conf-pct {
+        font-size: 12px; font-weight: 700; color: #1f2430; font-variant-numeric: tabular-nums;
+      }
+      #gmailgenie-floating-card .gg-track {
+        height: 7px; border-radius: 999px; background: #eceef4; overflow: hidden;
+      }
+      #gmailgenie-floating-card .gg-fill {
+        height: 100%; border-radius: 999px; animation: gg-fill 0.7s cubic-bezier(0.22,1,0.36,1);
+      }
+      #gmailgenie-floating-card .gg-fill.high   { background: linear-gradient(90deg,#12b76a,#34d399); }
+      #gmailgenie-floating-card .gg-fill.medium { background: linear-gradient(90deg,#f5a524,#fbbf24); }
+      #gmailgenie-floating-card .gg-fill.low    { background: linear-gradient(90deg,#f04438,#fb7185); }
+      #gmailgenie-floating-card .gg-card {
+        background: #f7f8fc; border: 1px solid #eef0f4; border-radius: 12px;
+        padding: 11px 13px; display: flex; flex-direction: column; gap: 9px;
+      }
+      #gmailgenie-floating-card .gg-editable { position: relative; cursor: pointer; border-radius: 12px; }
+      #gmailgenie-floating-card .gg-editable:hover .gg-card { border-color: #cfe0ff; }
+      #gmailgenie-floating-card .gg-edit-overlay {
+        position: absolute; inset: 0; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        background: rgba(37,117,252,0.12); color: #2575fc;
+        font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+        opacity: 0; transition: opacity 0.15s ease;
+      }
+      #gmailgenie-floating-card .gg-editable:hover .gg-edit-overlay { opacity: 1; }
+      #gmailgenie-floating-card .gg-edit-overlay svg { width: 16px; height: 16px; fill: currentColor; }
       #gmailgenie-floating-card .gg-row {
-        display: flex; gap: 6px; font-size: 12px; color: #5f6368; margin-bottom: 3px;
+        display: flex; gap: 9px; font-size: 12.5px; color: #4b5160; align-items: center;
       }
+      #gmailgenie-floating-card .gg-mi { width: 16px; height: 16px; fill: #6b7280; flex-shrink: 0; }
       #gmailgenie-floating-card .gg-btn {
-        display: block; width: 100%; margin-top: 12px; padding: 9px;
-        background: #188038; color: #fff; border: none; border-radius: 4px;
-        font-size: 13px; font-weight: 500; cursor: pointer;
+        display: block; width: 100%; margin-top: 14px; padding: 11px;
+        background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+        color: #fff; border: none; border-radius: 11px;
+        font-size: 13.5px; font-weight: 600; cursor: pointer;
         font-family: inherit; text-align: center;
+        box-shadow: 0 6px 16px rgba(37,117,252,0.28);
+        transition: transform 0.12s, box-shadow 0.15s;
       }
-      #gmailgenie-floating-card .gg-btn:hover { background: #0d6b2e; }
+      #gmailgenie-floating-card .gg-btn:hover {
+        background: linear-gradient(135deg, #0f9d58 0%, #34d399 100%);
+        transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,157,88,0.38);
+      }
+      #gmailgenie-floating-card .gg-btn:active { transform: translateY(1px); }
     </style>
     <div class="gg-head">
       <span class="gg-head-title">&#128197; GmailGenie detected an event</span>
@@ -347,13 +409,36 @@ function showEventCard(ev) {
     </div>
     <div class="gg-body">
       <div class="gg-title">${esc(ev.title || 'Untitled Event')}</div>
-      ${dateStr    ? `<div class="gg-row"><span>&#128197;</span><span>${esc(dateStr)}</span></div>` : ''}
-      ${ev.location? `<div class="gg-row"><span>&#128205;</span><span>${esc(ev.location)}</span></div>` : ''}
+
+      <div class="gg-conf">
+        <div class="gg-conf-head">
+          <span class="gg-conf-label">Confidence</span>
+          <span class="gg-conf-pct">${pct}%</span>
+        </div>
+        <div class="gg-track"><div class="gg-fill ${level}" style="width:${pct}%"></div></div>
+      </div>
+
+      <div class="gg-editable" id="gg-edit-zone" title="Edit event">
+        <div class="gg-card">
+          ${dateStr    ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/></svg><span>${esc(dateStr)}</span></div>` : ''}
+          ${ev.location? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg><span>${esc(ev.location)}</span></div>` : ''}
+          ${!dateStr && !ev.location ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg><span>Event detected</span></div>` : ''}
+        </div>
+        <div class="gg-edit-overlay">
+          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          Edit
+        </div>
+      </div>
       ${calUrl     ? `<button class="gg-btn" id="gg-cal">&#10133; Add to Google Calendar</button>` : ''}
     </div>
   `;
   document.body.appendChild(card);
   document.getElementById('gg-close').addEventListener('click', removeCard);
+  // Hover the details section to reveal "Edit"; click to open the editor popup.
+  document.getElementById('gg-edit-zone')?.addEventListener('click', () => {
+    safeSendMessage({ type: 'OPEN_EDITOR' });
+    removeCard();
+  });
   document.getElementById('gg-cal')?.addEventListener('click', () => {
     // Route through background.js so it can track the calendar tab and
     // switch the user back to Gmail automatically after the event is saved
