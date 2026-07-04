@@ -5,8 +5,6 @@ let currentState = {};
 const mainContent    = document.getElementById('main-content');
 const settingsPanel  = document.getElementById('settings-panel');
 const settingsBtn    = document.getElementById('settings-btn');
-const saveKeyBtn     = document.getElementById('save-key-btn');
-const cancelBtn      = document.getElementById('cancel-settings-btn');
 const apiKeyInput    = document.getElementById('api-key-input');
 
 // ── Initialise ──────────────────────────────────────────────────────────────
@@ -321,22 +319,14 @@ function setSettingsOpen(open) {
   mainContent.classList.toggle('hidden', open);
 }
 
+// The ⚙ button toggles the panel open/closed (it also serves as the "close"
+// action now that the Cancel button is gone).
 settingsBtn.addEventListener('click', () => {
   setSettingsOpen(settingsPanel.classList.contains('hidden'));
 });
 
-cancelBtn.addEventListener('click', () => {
-  setSettingsOpen(false);
-});
-
-saveKeyBtn.addEventListener('click', async () => {
-  const val = apiKeyInput.value.trim();
-  // Ignore if the user hasn't typed anything (still showing masked dots)
-  if (!val || val.startsWith('•')) return;
-  await saveApiKey(val);
-  setSettingsOpen(false);
-});
-
+// With no Save button, the API key is saved automatically: on Enter (which also
+// closes the panel) and on blur (when the user clicks away from the field).
 apiKeyInput.addEventListener('keydown', async (e) => {
   if (e.key === 'Enter') {
     const val = e.target.value.trim();
@@ -344,6 +334,13 @@ apiKeyInput.addEventListener('keydown', async (e) => {
     await saveApiKey(val);
     setSettingsOpen(false);
   }
+});
+
+apiKeyInput.addEventListener('blur', async () => {
+  const val = apiKeyInput.value.trim();
+  // Ignore empty input or the masked placeholder dots (unchanged key).
+  if (!val || val.startsWith('•')) return;
+  await saveApiKey(val);
 });
 
 async function saveApiKey(key) {

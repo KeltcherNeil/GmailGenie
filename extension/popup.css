@@ -420,11 +420,6 @@ textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
 }
 .dismiss-link:hover { color: var(--ink-soft); }
 
-.button-row {
-  display: flex;
-  gap: 8px;
-}
-
 /* ── Settings panel ──────────────────────────── */
 .settings-panel {
   border-top: 1px solid var(--line);
