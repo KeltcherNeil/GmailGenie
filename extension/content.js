@@ -311,7 +311,9 @@ function showEventCard(ev) {
       }
       #gmailgenie-floating-card .gg-head {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px; background: #1a73e8; color: #fff;
+        /* DEBUG BUILD (debug/auto-return branch): red header so it's obvious
+           which build is loaded while testing. Revert to #1a73e8 before merge. */
+        padding: 10px 14px; background: #d93025; color: #fff;
       }
       #gmailgenie-floating-card .gg-head-title {
         font-size: 12px; font-weight: 600; letter-spacing: 0.2px;

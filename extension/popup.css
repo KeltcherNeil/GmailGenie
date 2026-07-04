@@ -18,7 +18,9 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #1a73e8;
+  /* DEBUG BUILD (debug/auto-return branch): red header so it's obvious which
+     build is loaded while testing. Revert to #1a73e8 before merging to main. */
+  background: #d93025;
   color: #ffffff;
 }
 
