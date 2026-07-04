@@ -65,7 +65,7 @@ Gmail Tab (content.js)
 
 background.js
     → receives email text
-    → calls Python backend at localhost:5000
+    → calls Python backend at localhost:5001
     → stores result in chrome.storage
 
 popup.html / popup.js
@@ -144,8 +144,15 @@ FLASK_ENV=development
 cd backend
 pip install -r requirements.txt
 python app.py
-# Server runs at http://localhost:5000
+# Server runs at http://localhost:5001
 ```
+
+> **macOS note:** the backend defaults to port **5001**, not 5000. macOS's AirPlay
+> Receiver (Control Center) listens on port 5000 and returns `403 Forbidden` to
+> every request, so a backend on 5000 is unreachable from the extension. The
+> extension is hardcoded to talk to `http://localhost:5001`. If you change `PORT`,
+> update `BACKEND_URL` in `extension/background.js` and the `host_permissions`
+> entry in `extension/manifest.json` to match.
 
 **Load the Chrome extension:**
 1. Go to `chrome://extensions`

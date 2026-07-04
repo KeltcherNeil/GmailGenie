@@ -31,7 +31,8 @@ If no scheduling information is found:
 let currentJobId = null;
 
 // Local Flask backend that writes events straight to Google Calendar via the API.
-const BACKEND_URL = 'http://localhost:5000';
+// Port 5001, not 5000: macOS AirPlay Receiver occupies 5000 and returns 403.
+const BACKEND_URL = 'http://localhost:5001';
 
 // Returns e.g. "Wednesday, June 25, 2026" so Claude can resolve relative dates
 function todayString() {
@@ -191,7 +192,7 @@ async function createCalendarEvent(event) {
     console.log('[GmailGenie] event created', data.htmlLink);
     return { ok: true, htmlLink: data.htmlLink, id: data.id };
   } catch (err) {
-    // Almost always: the Flask backend isn't running on localhost:5000.
+    // Almost always: the Flask backend isn't running on localhost:5001.
     console.log('[GmailGenie] event creation request failed:', err.message);
     return {
       ok: false,

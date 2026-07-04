@@ -155,6 +155,9 @@ def create_event_route():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    port  = int(os.getenv('PORT', 5000))
+    # Default to 5001, not 5000: on macOS the AirPlay Receiver service squats on
+    # port 5000 and answers every request with 403 Forbidden, so the extension
+    # would never reach Flask. Override with the PORT env var if needed.
+    port  = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_ENV') == 'development'
     app.run(host='0.0.0.0', port=port, debug=debug)

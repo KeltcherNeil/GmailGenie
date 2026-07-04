@@ -10,7 +10,7 @@
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
     "https://api.anthropic.com/*",
-    "http://localhost:5000/*"
+    "http://localhost:5001/*"
   ],
   "background": {
     "service_worker": "background.js"
