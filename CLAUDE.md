@@ -70,8 +70,10 @@ background.js
 
 popup.html / popup.js
     → reads result from chrome.storage
-    → shows suggested event to user
-    → on button click, calls Google Calendar API to create event
+    → shows suggested (editable) event to user
+    → on "Add to Calendar", sends CREATE_EVENT to background.js
+    → background.js POSTs the event to the backend /create-event, which writes it
+      straight to Google Calendar via the API — no calendar tab opens, no manual Save
 
 Python Backend (app.py)
     → receives email text
@@ -158,7 +160,13 @@ python app.py
 | Method | Endpoint | Description |
 |---|---|---|
 | POST | `/extract-event` | Takes email text, returns extracted event JSON |
+| POST | `/create-event` | Takes an event JSON object, creates it on the user's primary Google Calendar via the API, returns `{ ok, id, htmlLink }` |
 | GET | `/health` | Health check — returns 200 if server is running |
+
+**Note on `/create-event` OAuth:** the first call runs `calendar_helper.get_calendar_service()`,
+which needs `backend/credentials.json` (a **Desktop** OAuth client downloaded from Google Cloud
+Console) and opens a browser once for consent, writing `backend/token.json`. Both files are
+gitignored. Subsequent calls reuse/refresh the token silently.
 
 ---
 
@@ -188,89 +196,34 @@ tests/test_emails/has_event/email_001_expected.json  # expected extraction outpu
 
 ### 1. Calendar tab does not auto-close / return to email after saving
 
-**Status:** ✅ Fixed — see "Root cause & fix" below. Kept here for context.
+**Status:** ✅ Superseded — the whole "open a Google Calendar tab and click Save" flow was
+removed. GmailGenie now creates the event directly via the Google Calendar API, so there is no
+calendar tab to close and no manual Save step. See the new flow below.
 
-**What should happen (desired behaviour):**
-1. User clicks **Add to Google Calendar** (popup) or the floating card's calendar button.
-2. A new tab opens on Google Calendar's event-template page (`/calendar/render?action=TEMPLATE&...`).
-3. User clicks **Save** in Google Calendar and the event is created successfully.
-4. **The calendar tab should automatically close**, and focus should return to the
-   original Gmail (or Outlook) tab the user came from.
+**Old behaviour (removed):**
+Clicking **Add to Calendar** built a `calendar.google.com/calendar/render?action=TEMPLATE` deeplink,
+opened it in a new tab, and the user clicked **Save** there. A fragile auto-return system in
+`background.js` (tab tracking via `calTabId`/`calSourceTabId`, `chrome.tabs.onUpdated` /
+`chrome.webNavigation` listeners, an injected save-button watcher, and a `beforeunload` suppressor)
+tried to detect the save and close the tab. It was unreliable and has been deleted.
 
-**What actually happens:**
-- Steps 1–3 work: the event is created correctly in Google Calendar.
-- Step 4 fails: the calendar tab stays open, and the user is left sitting on the Google
-  Calendar view instead of being returned to their email. They have to manually close the
-  tab and switch back.
+**New behaviour (current):**
+1. User clicks **Add to Calendar** (popup) or **Add to Google Calendar** (floating card).
+2. The extension sends a `CREATE_EVENT` message to `background.js`.
+3. `background.js` → `createCalendarEvent()` POSTs the event to the backend `POST /create-event`.
+4. The backend uses `calendar_helper.get_calendar_service()` + `create_event()` to insert the
+   event on the user's primary Google Calendar via the API.
+5. The button shows **Creating… → Added to Calendar ✓** (or an error). No tab ever opens.
 
-**Where this logic lives:**
-- `extension/popup.js` → `openGoogleCalendar(event)` — opens the calendar tab and stores
-  `calSourceTabId` (the Gmail tab to return to) and `calTabId` (the calendar tab to close)
-  in `chrome.storage.local`.
-- `extension/content.js` (~line 353) → floating card sends an `OPEN_CALENDAR` message to the
-  background worker instead of opening the tab itself.
-- `extension/background.js` → `openCalendarTab(url, sourceTabId)` — the message-based path
-  that also records `calSourceTabId` / `calTabId`.
-- `extension/background.js` → `chrome.tabs.onUpdated` listener (~line 164) — the auto-return
-  detector. It watches the tracked calendar tab and, once `isCalendarHomeUrl(tab.url)`
-  returns true, focuses `calSourceTabId` and calls `chrome.tabs.remove()` on the calendar tab.
-- `extension/background.js` → `isCalendarHomeUrl(url)` (~line 149) — decides whether the
-  calendar tab has "landed" on the main calendar view after a save.
+**Where this logic lives now:**
+- `extension/popup.js` → `createEvent()` — sends `CREATE_EVENT`, renders the button states.
+- `extension/content.js` → `createEventFromCard()` — same for the floating card.
+- `extension/background.js` → `CREATE_EVENT` handler + `createCalendarEvent()` — POSTs to the backend.
+- `backend/app.py` → `POST /create-event` — validates and calls `calendar_helper.create_event()`.
+- `backend/calendar_helper.py` → `get_calendar_service()` / `create_event()` — Google Calendar API.
 
-**How the current design is supposed to detect a save:**
-After saving, Google Calendar navigates the tab away from the `?action=TEMPLATE` template
-page back to the main calendar view (e.g. `/calendar/u/0/r/week/...`). The extension treats
-"navigated to the main calendar home URL" as the signal that the save completed, then closes
-the tab and returns focus. The most recent commit ("Fix auto-return: handle account-prefixed
-URLs and SPA navigation") added handling for the `/u/<n>/` account prefix and for
-client-side SPA navigations (`changeInfo.url` in addition to `status === 'complete'`).
-
-**Why it may still be failing (observations — not yet verified):**
-- **The post-save URL may not match `isCalendarHomeUrl`.** Google Calendar may redirect to a
-  URL shape the regex `^\/calendar\/(u\/\d+\/)?r(\/|$)/` doesn't cover (e.g. an `eventedit`
-  view, an `/eventedit/`/`/r/eventedit` intermediate, a lingering `action`/other query param,
-  a different host locale, or a "saved" confirmation view), so the listener never fires.
-- **The tab-tracking IDs may be lost.** The MV3 service worker (`background.js`) can be torn
-  down between opening the calendar tab and the save completing. If it restarts, in-memory
-  state is gone — this design stores the IDs in `chrome.storage.local` so they should survive,
-  but the `chrome.tabs.onUpdated` listener must be re-registered on wake-up for the event to
-  be caught at all.
-- **The save may not trigger a tracked navigation.** If Google Calendar saves via a
-  background XHR/fetch and updates the view without a URL change the listener can see, neither
-  `status === 'complete'` nor `changeInfo.url` fires for the tracked tab.
-- **Source-tab focus vs. tab-close are coupled.** Both happen only inside the
-  `isCalendarHomeUrl` branch, so if detection fails, neither the close nor the return occurs.
-
-**How to reproduce:**
-1. Open an email in Gmail that contains a clear event.
-2. In the GmailGenie popup, click **Add to Google Calendar**.
-3. In the calendar tab that opens, click **Save**.
-4. Observe: the event is created, but the calendar tab remains open and focus does not return
-   to the Gmail tab.
-
-**Root cause & fix:**
-The failure was **lost tab-tracking state**, specifically a race in the popup path. When the
-user clicked **Add to Google Calendar**, `popup.js` opened the calendar tab itself with
-`chrome.tabs.create()` and then recorded the tracking IDs with a fire-and-forget
-`chrome.storage.local.set({ calSourceTabId, calTabId })`. Opening a new tab shifts focus away
-from the popup, which **closes the popup and destroys its JS context** — often before that
-async storage write completed. With `calTabId` never persisted, the `chrome.tabs.onUpdated`
-listener in `background.js` could never match the calendar tab (`tabId !== calTabId`), so it
-never closed the tab or switched back. (The floating-card path in `content.js` was unaffected
-because it already routed through the always-alive background worker.)
-
-The fix routes the popup path through the background service worker too:
-- `popup.js` → `openGoogleCalendar()` now sends
-  `{ type: 'OPEN_CALENDAR', url, sourceTabId }` instead of creating the tab itself. It passes
-  `sourceTabId` explicitly because a popup has no `sender.tab`.
-- `background.js` → the `OPEN_CALENDAR` handler uses `message.sourceTabId ?? sender.tab?.id`,
-  so both the popup and the floating card work.
-- `background.js` → `openCalendarTab()` now **awaits** the `chrome.storage.local.set()` so the
-  tracking IDs are guaranteed persisted before the user can save.
-
-Because the background worker stays alive across the tab creation, the storage write always
-completes, so the auto-return listener reliably matches the calendar tab and closes it /
-returns focus after the save lands on the main calendar view.
+**Requirement:** the backend needs `backend/credentials.json` (a Desktop OAuth client) and does a
+one-time browser consent on first create (writes `backend/token.json`). Both files are gitignored.
 
 ---
 
@@ -278,7 +231,8 @@ returns focus after the save lands on the main calendar view.
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
 - The Flask backend must be running locally for the extension to work — there is no hosted backend yet
-- OAuth tokens expire — the extension handles refresh automatically via Chrome's identity API
+- OAuth tokens expire — the backend refreshes them automatically (`calendar_helper.get_calendar_service` uses the stored `backend/token.json` refresh token)
+- The backend must be running for **event creation** too, not just extraction — `POST /create-event` is what writes to Google Calendar
 - Emails with multiple scheduling requests in one thread may only extract the most recent one
 - Timezone handling is not yet implemented — all times are treated as local time
 

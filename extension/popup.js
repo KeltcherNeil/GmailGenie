@@ -189,7 +189,8 @@ function renderEvent(event) {
   startInput.addEventListener('input', refreshDurHint);
   endInput.addEventListener('input', refreshDurHint);
 
-  // Build the (possibly edited) event from the form and open Calendar.
+  // Build the (possibly edited) event from the form and create it directly on
+  // Google Calendar — no calendar tab, no manual Save.
   const submit = () => {
     const start = valueOf('f-time')    || null;
     const end   = valueOf('f-endtime') || null;
@@ -201,7 +202,7 @@ function renderEvent(event) {
       location:         valueOf('f-location') || null,
       description:      valueOf('f-desc')     || null,
     };
-    openGoogleCalendar(edited);
+    createEvent(edited);
   };
 
   document.getElementById('add-cal-btn').addEventListener('click', submit);
@@ -358,75 +359,61 @@ document.querySelectorAll('input[name="notif-mode"]').forEach(radio => {
   });
 });
 
-// ── Google Calendar deeplink ─────────────────────────────────────────────────
+// ── Direct calendar creation ─────────────────────────────────────────────────
+// Ask the background worker to create the event on Google Calendar via the
+// backend. No calendar tab opens; the button shows Creating → Added ✓ / error
+// right here in the popup.
 
-async function openGoogleCalendar(event) {
-  let dateParam = '';
+async function createEvent(event) {
+  const btn = document.getElementById('add-cal-btn');
+  if (!btn) return;
 
-  if (event.date) {
-    const start = toGCalDatetime(event.date, event.time);
-    let end;
-    if (event.time && event.duration_minutes) {
-      end = shiftDatetime(start, event.duration_minutes);
-    } else if (event.time) {
-      end = shiftDatetime(start, 60); // default 1 hour
-    } else {
-      // All-day: end = next calendar day
-      end = nextDay(event.date);
-    }
-    dateParam = `${start}/${end}`;
+  if (!event.date) {
+    setButtonState(btn, 'error', 'No date detected — edit the event first');
+    return;
   }
 
-  const params = new URLSearchParams({ action: 'TEMPLATE' });
-  params.set('text', event.title || 'Event from GmailGenie');
-  if (dateParam)         params.set('dates',    dateParam);
-  if (event.location)    params.set('location', event.location);
-  if (event.description) params.set('details',  event.description);
+  setButtonState(btn, 'loading', 'Creating…');
 
-  const calUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage({ type: 'CREATE_EVENT', event });
+  } catch (err) {
+    result = { ok: false, error: err.message };
+  }
 
-  // Route through the background service worker so it opens the tab AND records
-  // the tracking IDs (calSourceTabId / calTabId) that auto-return depends on.
-  //
-  // Opening the tab here in the popup was unreliable: creating a new tab shifts
-  // focus and closes the popup, destroying its JS context before the
-  // fire-and-forget chrome.storage.local.set() could persist calTabId. With no
-  // calTabId stored, background.js's onUpdated listener never matched the
-  // calendar tab, so it never closed it or switched back after saving.
-  //
-  // The popup has no sender.tab, so pass the source (Gmail/Outlook) tab id along.
-  const [sourceTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl, sourceTabId: sourceTab?.id });
+  if (result && result.ok) {
+    setButtonState(btn, 'success', 'Added to Calendar ✓');
+  } else {
+    const msg = (result && result.error) || 'Could not create the event.';
+    setButtonState(btn, 'error', 'Failed — try again');
+    showActionError(msg);
+  }
 }
 
-// "2024-03-15", "14:00" → "20240315T140000"
-function toGCalDatetime(dateStr, timeStr) {
-  const d = dateStr.replace(/-/g, '');
-  if (!timeStr) return d;
-  const t = timeStr.replace(':', '') + '00';
-  return `${d}T${t}`;
+// Reflect the create request's progress on the Add-to-Calendar button.
+function setButtonState(btn, state, label) {
+  btn.classList.remove('is-loading', 'is-success', 'is-error');
+  btn.disabled = (state === 'loading' || state === 'success');
+  if (state === 'loading')  btn.classList.add('is-loading');
+  if (state === 'success')  btn.classList.add('is-success');
+  if (state === 'error')    btn.classList.add('is-error');
+  // Keep the calendar icon only in the default/idle state.
+  btn.innerHTML = (state === 'success' || state === 'loading' || state === 'error')
+    ? esc(label)
+    : `${ICON.calendar} ${esc(label)}`;
 }
 
-// "20240315T140000" + 90 → "20240315T153000"
-function shiftDatetime(dt, minutes) {
-  const hasTime = dt.includes('T');
-  if (!hasTime) return dt;
-  const yr  = +dt.slice(0, 4);
-  const mo  = +dt.slice(4, 6) - 1;
-  const dy  = +dt.slice(6, 8);
-  const hr  = +dt.slice(9, 11);
-  const mn  = +dt.slice(11, 13);
-  const d   = new Date(yr, mo, dy, hr, mn + minutes);
-  const p   = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}00`;
-}
-
-// "2024-03-15" → "20240316" (next day, for all-day events)
-function nextDay(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + 1);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+// Show a small inline error under the button (e.g. backend not running).
+function showActionError(msg) {
+  let box = document.getElementById('action-error');
+  if (!box) {
+    box = document.createElement('p');
+    box.id = 'action-error';
+    box.className = 'action-error';
+    document.getElementById('add-cal-btn').insertAdjacentElement('afterend', box);
+  }
+  box.textContent = msg;
 }
 
 // ── Formatting helpers ───────────────────────────────────────────────────────

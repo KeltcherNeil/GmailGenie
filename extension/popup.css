@@ -379,6 +379,33 @@ textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
   box-shadow: 0 10px 24px rgba(15, 157, 88, 0.38);
 }
 
+/* Add-to-Calendar create states (direct API creation) */
+.btn.cal.is-loading {
+  opacity: 0.85;
+  cursor: default;
+  transform: none;
+}
+.btn.cal.is-loading:hover { background: var(--grad); transform: none; }
+.btn.cal.is-success {
+  background: var(--grad-green);
+  cursor: default;
+  transform: none;
+  box-shadow: 0 6px 16px rgba(15, 157, 88, 0.30);
+}
+.btn.cal.is-error {
+  background: linear-gradient(135deg, #f04438 0%, #fb7185 100%);
+  box-shadow: 0 6px 16px rgba(240, 68, 56, 0.30);
+}
+.btn.cal.is-error:hover { transform: translateY(-2px); }
+
+.action-error {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b42318;
+  text-align: center;
+}
+
 .dismiss-link {
   background: none;
   border: none;

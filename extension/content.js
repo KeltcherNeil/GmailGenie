@@ -188,13 +188,21 @@ function isExtensionValid() {
   try { return !!chrome.runtime?.id; } catch { return false; }
 }
 
-function safeSendMessage(message) {
-  if (!isExtensionValid()) return;
+function safeSendMessage(message, callback) {
+  if (!isExtensionValid()) {
+    // Report failure to any caller expecting a response so its UI can recover.
+    if (callback) callback({ ok: false, error: 'Extension reloaded — refresh the page.' });
+    return;
+  }
   try {
-    chrome.runtime.sendMessage(message, () => {
-      void chrome.runtime.lastError;
+    chrome.runtime.sendMessage(message, (response) => {
+      // Reading lastError clears the "unchecked runtime.lastError" warning.
+      const err = chrome.runtime.lastError;
+      if (callback) callback(err ? { ok: false, error: err.message } : response);
     });
-  } catch (_) {}
+  } catch (_) {
+    if (callback) callback({ ok: false, error: 'Could not reach the extension.' });
+  }
 }
 
 // ── Navigation detection ──────────────────────────────────────────────────────
@@ -244,35 +252,6 @@ function removeCard() {
   document.getElementById(CARD_ID)?.remove();
 }
 
-function buildCalUrl(ev) {
-  if (!ev.date) return null;
-  const d = ev.date.replace(/-/g, '');
-  const t = ev.time ? ev.time.replace(':', '') + '00' : null;
-  const start = t ? `${d}T${t}` : d;
-  let end;
-  if (t) {
-    const mins = ev.duration_minutes || 60;
-    const [yr, mo, dy, hr, mn] = [
-      +ev.date.slice(0,4), +ev.date.slice(5,7)-1, +ev.date.slice(8,10),
-      +ev.time.slice(0,2), +ev.time.slice(3,5)
-    ];
-    const e = new Date(yr, mo, dy, hr, mn + mins);
-    const p = n => String(n).padStart(2,'0');
-    end = `${e.getFullYear()}${p(e.getMonth()+1)}${p(e.getDate())}T${p(e.getHours())}${p(e.getMinutes())}00`;
-  } else {
-    const nd = new Date(ev.date + 'T00:00:00');
-    nd.setDate(nd.getDate() + 1);
-    const p = n => String(n).padStart(2,'0');
-    end = `${nd.getFullYear()}${p(nd.getMonth()+1)}${p(nd.getDate())}`;
-  }
-  const params = new URLSearchParams({ action: 'TEMPLATE' });
-  params.set('text', ev.title || 'Event');
-  if (start && end) params.set('dates', `${start}/${end}`);
-  if (ev.location)    params.set('location', ev.location);
-  if (ev.description) params.set('details',  ev.description);
-  return `https://calendar.google.com/calendar/render?${params}`;
-}
-
 function fmtCardDate(ev) {
   const parts = [];
   if (ev.date) {
@@ -303,8 +282,10 @@ function cardConfidencePercent(ev) {
 
 function showEventCard(ev) {
   removeCard();
-  const calUrl  = buildCalUrl(ev);
-  const dateStr = fmtCardDate(ev);
+  // The event can be created directly on Google Calendar as long as it has a
+  // date; time/duration are optional (all-day event otherwise).
+  const canCreate = !!ev.date;
+  const dateStr   = fmtCardDate(ev);
 
   const pct   = cardConfidencePercent(ev);
   const level = pct >= 80 ? 'high' : pct >= 50 ? 'medium' : 'low';
@@ -402,6 +383,20 @@ function showEventCard(ev) {
         transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,157,88,0.38);
       }
       #gmailgenie-floating-card .gg-btn:active { transform: translateY(1px); }
+      #gmailgenie-floating-card .gg-btn:disabled {
+        cursor: default; transform: none; box-shadow: 0 6px 16px rgba(37,117,252,0.20);
+      }
+      #gmailgenie-floating-card .gg-btn.gg-btn-success,
+      #gmailgenie-floating-card .gg-btn.gg-btn-success:hover {
+        background: linear-gradient(135deg, #0f9d58 0%, #34d399 100%);
+        box-shadow: 0 6px 16px rgba(15,157,88,0.30); transform: none;
+      }
+      #gmailgenie-floating-card .gg-status {
+        margin-top: 9px; font-size: 12px; line-height: 1.4; text-align: center;
+      }
+      #gmailgenie-floating-card .gg-status:empty { margin-top: 0; }
+      #gmailgenie-floating-card .gg-status.ok  { color: #0f9d58; }
+      #gmailgenie-floating-card .gg-status.err { color: #d92d20; }
     </style>
     <div class="gg-head">
       <span class="gg-head-title">&#128197; GmailGenie detected an event</span>
@@ -429,7 +424,8 @@ function showEventCard(ev) {
           Edit
         </div>
       </div>
-      ${calUrl     ? `<button class="gg-btn" id="gg-cal">&#10133; Add to Google Calendar</button>` : ''}
+      ${canCreate  ? `<button class="gg-btn" id="gg-cal">&#10133; Add to Google Calendar</button>` : ''}
+      <div class="gg-status" id="gg-status"></div>
     </div>
   `;
   document.body.appendChild(card);
@@ -440,10 +436,43 @@ function showEventCard(ev) {
     removeCard();
   });
   document.getElementById('gg-cal')?.addEventListener('click', () => {
-    // Route through background.js so it can track the calendar tab and
-    // switch the user back to Gmail automatically after the event is saved
-    safeSendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
-    removeCard();
+    createEventFromCard(ev);
+  });
+}
+
+// Create the event directly on Google Calendar (via background → backend).
+// No tab opens; the card's button reflects Creating → Added ✓ / error, then
+// the card auto-dismisses on success.
+function createEventFromCard(ev) {
+  const btn    = document.getElementById('gg-cal');
+  const status = document.getElementById('gg-status');
+  if (!btn) return;
+
+  const event = {
+    title:            ev.title || 'Event',
+    date:             ev.date || null,
+    time:             ev.time || null,
+    duration_minutes: ev.duration_minutes || null,
+    location:         ev.location || null,
+    description:      ev.description || null,
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  if (status) { status.textContent = ''; status.className = 'gg-status'; }
+
+  safeSendMessage({ type: 'CREATE_EVENT', event }, (result) => {
+    if (result && result.ok) {
+      btn.textContent = '✓ Added to Calendar';
+      btn.classList.add('gg-btn-success');
+      if (status) { status.textContent = 'Event created on your Google Calendar.'; status.classList.add('ok'); }
+      setTimeout(removeCard, 2500);
+    } else {
+      const msg = (result && result.error) || 'Could not create the event.';
+      btn.disabled = false;
+      btn.textContent = '↺ Try again';
+      if (status) { status.textContent = msg; status.classList.add('err'); }
+    }
   });
 }
 
