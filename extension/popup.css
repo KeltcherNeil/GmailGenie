@@ -40,7 +40,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px;
+  padding: 8px 16px;
   background: var(--grad);
   color: #ffffff;
   position: relative;
@@ -67,19 +67,19 @@ header::after {
 }
 
 .logo-icon {
-  font-size: 18px;
-  width: 30px;
-  height: 30px;
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.18);
-  border-radius: 9px;
+  border-radius: 7px;
   backdrop-filter: blur(4px);
 }
 
 .logo-text {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.2px;
 }
@@ -88,10 +88,10 @@ header::after {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 17px;
+  font-size: 15px;
   color: #ffffff;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -103,7 +103,7 @@ header::after {
 
 /* ── Main content area ───────────────────────── */
 main {
-  padding: 18px 16px;
+  padding: 12px 16px;
   min-height: 120px;
 }
 
@@ -157,7 +157,7 @@ main {
 
 /* ── Confidence bar ──────────────────────────── */
 .confidence {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
   animation: conf-in 0.45s ease both;
 }
 
@@ -211,11 +211,11 @@ main {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 13px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 11px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.22s ease, transform 0.22s ease;
 }
