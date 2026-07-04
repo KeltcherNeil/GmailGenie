@@ -139,9 +139,32 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     handleCalendarSaveClicked(sender.tab?.id);
   } else if (message.type === 'CALENDAR_SAVE_COMPLETED') {
     handleCalendarSaveCompleted(sender.tab?.id, message.reason);
+  } else if (message.type === 'OPEN_EDITOR') {
+    openEditor();
   }
   return false;
 });
+
+// Open the editable "main pop up". Prefer the real toolbar popup
+// (chrome.action.openPopup, Chrome 127+); fall back to a small popup window
+// showing the same editable UI when that call isn't available/allowed.
+async function openEditor() {
+  try {
+    if (chrome.action.openPopup) {
+      await chrome.action.openPopup();
+      console.log('[GmailGenie] opened toolbar popup for editing');
+      return;
+    }
+  } catch (err) {
+    console.log('[GmailGenie] openPopup failed, opening window instead:', err.message);
+  }
+  chrome.windows.create({
+    url: chrome.runtime.getURL('popup.html'),
+    type: 'popup',
+    width: 384,
+    height: 640
+  });
+}
 
 async function openCalendarTab(url, sourceTabId) {
   const calTab = await chrome.tabs.create({ url });
