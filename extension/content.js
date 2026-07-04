@@ -177,11 +177,7 @@ function checkForEmailChange() {
 
   lastEmailId = currentId;
 
-  chrome.runtime.sendMessage({ type: 'EMAIL_OPENED', payload: emailData }, () => {
-    // chrome.runtime.lastError just means the service worker was sleeping;
-    // Chrome wakes it on the next message, so silently ignore.
-    void chrome.runtime.lastError;
-  });
+  safeSendMessage({ type: 'EMAIL_OPENED', payload: emailData });
 }
 
 // ── Extension validity guard ──────────────────────────────────────────────────
@@ -190,6 +186,15 @@ function checkForEmailChange() {
 
 function isExtensionValid() {
   try { return !!chrome.runtime?.id; } catch { return false; }
+}
+
+function safeSendMessage(message) {
+  if (!isExtensionValid()) return;
+  try {
+    chrome.runtime.sendMessage(message, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {}
 }
 
 // ── Navigation detection ──────────────────────────────────────────────────────
@@ -311,7 +316,7 @@ function showEventCard(ev) {
       }
       #gmailgenie-floating-card .gg-head {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px; background: #8e24aa; color: #fff;
+        padding: 10px 14px; background: #1a73e8; color: #fff;
       }
       #gmailgenie-floating-card .gg-head-title {
         font-size: 12px; font-weight: 600; letter-spacing: 0.2px;
@@ -352,7 +357,7 @@ function showEventCard(ev) {
   document.getElementById('gg-cal')?.addEventListener('click', () => {
     // Route through background.js so it can track the calendar tab and
     // switch the user back to Gmail automatically after the event is saved
-    chrome.runtime.sendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
+    safeSendMessage({ type: 'OPEN_CALENDAR', url: calUrl });
     removeCard();
   });
 }
