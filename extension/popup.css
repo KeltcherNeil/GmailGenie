@@ -2,6 +2,7 @@
 
 :root {
   --grad: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+  --grad-green: linear-gradient(135deg, #0f9d58 0%, #34d399 100%);
   --grad-soft: linear-gradient(135deg, #7b2ff7 0%, #3a7bfd 100%);
   --ink: #1f2430;
   --ink-soft: #6b7280;
@@ -365,6 +366,18 @@ textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
   box-shadow: var(--shadow-btn);
 }
 .btn.green:hover { box-shadow: 0 10px 24px rgba(37, 117, 252, 0.38); transform: translateY(-2px); }
+
+/* Add-to-Calendar CTA: purple gradient → green gradient on hover */
+.btn.cal {
+  background: var(--grad);
+  color: #ffffff;
+  box-shadow: var(--shadow-btn);
+}
+.btn.cal:hover {
+  background: var(--grad-green);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(15, 157, 88, 0.38);
+}
 
 .dismiss-link {
   background: none;

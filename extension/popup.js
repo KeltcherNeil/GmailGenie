@@ -168,7 +168,7 @@ function renderEvent(event) {
         </label>
       </form>
 
-      <button id="add-cal-btn" class="btn primary full-width">${ICON.calendar} Add to Calendar</button>
+      <button id="add-cal-btn" class="btn cal full-width">${ICON.calendar} Add to Calendar</button>
       <button id="dismiss-btn" class="dismiss-link">Not an event? Dismiss</button>
     </div>
   `;

@@ -387,7 +387,8 @@ function showEventCard(ev) {
         transition: transform 0.12s, box-shadow 0.15s;
       }
       #gmailgenie-floating-card .gg-btn:hover {
-        transform: translateY(-1px); box-shadow: 0 8px 22px rgba(37,117,252,0.36);
+        background: linear-gradient(135deg, #0f9d58 0%, #34d399 100%);
+        transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,157,88,0.38);
       }
       #gmailgenie-floating-card .gg-btn:active { transform: translateY(1px); }
     </style>
