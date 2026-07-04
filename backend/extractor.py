@@ -12,10 +12,23 @@ from datetime import date
 
 from anthropic import Anthropic
 
-# Client reads ANTHROPIC_API_KEY from the environment automatically
-client = Anthropic()
-
 MODEL = 'claude-haiku-4-5-20251001'
+
+# The Anthropic client is created lazily (on first extraction) rather than at
+# import time. Creating it eagerly requires ANTHROPIC_API_KEY to be set, which
+# would crash the whole backend on startup — including the /create-event route,
+# which needs no Claude access at all (extraction runs client-side in the
+# extension). Lazy init lets the backend boot and create calendar events even
+# when no Anthropic key is configured.
+_client = None
+
+
+def _get_client() -> Anthropic:
+    global _client
+    if _client is None:
+        # Reads ANTHROPIC_API_KEY from the environment automatically.
+        _client = Anthropic()
+    return _client
 
 SYSTEM_PROMPT = """\
 You extract scheduling information from email text.
@@ -71,7 +84,7 @@ def extract_event(subject: str, body: str, sender: str = '') -> dict:
         email_text += f"From: {sender}\n"
     email_text += f"\n{body}"
 
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=512,
         system=SYSTEM_PROMPT,
