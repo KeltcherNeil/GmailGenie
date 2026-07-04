@@ -102,59 +102,161 @@ function renderProcessing() {
   `;
 }
 
+// Inline Material Symbols (as SVG) so icons match Gmail/Calendar and need no
+// remote font. currentColor lets them inherit the label colour.
+const ICON = {
+  calendar: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/></svg>',
+  clock: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>',
+  location: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>',
+  description: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
+  title: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg>',
+};
+
 function renderEvent(event) {
-  const conf   = event.confidence || 'medium';
-  const confLabel = conf.charAt(0).toUpperCase() + conf.slice(1) + ' confidence';
+  const pct   = confidencePercent(event);
+  const level = confidenceLevel(pct);
 
-  const dateStr     = formatDate(event.date);
-  const timeStr     = formatTime(event.time);
-  const durationStr = formatDuration(event.duration_minutes);
-
-  const dateTime = [dateStr, timeStr].filter(Boolean).join(' · ');
+  // Prefill Ends from start + duration (default 1h); show the resulting duration.
+  const startVal   = event.time || '';
+  const endVal     = computeEndTime(event.time, event.duration_minutes);
+  const initialDur = durationFromTimes(startVal, endVal);
+  const durHint    = initialDur ? 'Duration: ' + formatDuration(initialDur) : '';
 
   mainContent.innerHTML = `
     <div class="event-view">
-      <div class="event-title">${esc(event.title || 'Untitled Event')}</div>
-      <span class="confidence-badge confidence-${conf}">${confLabel}</span>
-
-      <div class="event-details">
-        ${dateTime ? `
-          <div class="detail-row">
-            <span class="detail-icon">&#128197;</span>
-            <span class="detail-value">${esc(dateTime)}</span>
-          </div>` : ''}
-        ${durationStr ? `
-          <div class="detail-row">
-            <span class="detail-icon">&#9200;</span>
-            <span class="detail-value">${esc(durationStr)}</span>
-          </div>` : ''}
-        ${event.location ? `
-          <div class="detail-row">
-            <span class="detail-icon">&#128205;</span>
-            <span class="detail-value">${esc(event.location)}</span>
-          </div>` : ''}
-        ${event.description ? `
-          <div class="detail-row">
-            <span class="detail-icon">&#128203;</span>
-            <span class="detail-value">${esc(event.description)}</span>
-          </div>` : ''}
+      <div class="confidence">
+        <div class="confidence-head">
+          <span class="confidence-label">Confidence</span>
+          <span class="confidence-pct">${pct}%</span>
+        </div>
+        <div class="confidence-track">
+          <div class="confidence-fill conf-${level}"></div>
+        </div>
       </div>
 
-      <button id="add-cal-btn" class="btn green full-width">
-        &#10133; Add to Google Calendar
-      </button>
+      <form class="event-card" id="event-form" autocomplete="off">
+        <label class="field">
+          <span class="field-label">${ICON.title} Title</span>
+          <input type="text" id="f-title" class="field-input" value="${esc(event.title || '')}" placeholder="Event title" />
+        </label>
+
+        <label class="field emph">
+          <span class="field-label">${ICON.calendar} Date</span>
+          <input type="date" id="f-date" class="field-input" value="${esc(event.date || '')}" />
+        </label>
+
+        <div class="field-row">
+          <label class="field emph">
+            <span class="field-label">${ICON.clock} Starts</span>
+            <input type="time" id="f-time" class="field-input" value="${esc(startVal)}" />
+          </label>
+          <label class="field emph">
+            <span class="field-label">${ICON.clock} Ends</span>
+            <input type="time" id="f-endtime" class="field-input" value="${esc(endVal)}" />
+          </label>
+        </div>
+        <div class="end-hint" id="end-hint">${durHint}</div>
+
+        <label class="field">
+          <span class="field-label">${ICON.location} Location</span>
+          <input type="text" id="f-location" class="field-input" value="${esc(event.location || '')}" placeholder="Add location" />
+        </label>
+
+        <label class="field">
+          <span class="field-label">${ICON.description} Description</span>
+          <textarea id="f-desc" class="field-input" rows="2" placeholder="Add description">${esc(event.description || '')}</textarea>
+        </label>
+      </form>
+
+      <button id="add-cal-btn" class="btn primary full-width">${ICON.calendar} Add to Calendar</button>
       <button id="dismiss-btn" class="dismiss-link">Not an event? Dismiss</button>
     </div>
   `;
 
-  document.getElementById('add-cal-btn').addEventListener('click', () => {
-    openGoogleCalendar(event);
+  // Animate the confidence bar from 0 → pct on the next frame so the CSS
+  // width transition plays instead of snapping.
+  const fill = mainContent.querySelector('.confidence-fill');
+  if (fill) requestAnimationFrame(() => { fill.style.width = pct + '%'; });
+
+  // Live-update the "Duration: …" hint as start/end are edited.
+  const startInput = document.getElementById('f-time');
+  const endInput   = document.getElementById('f-endtime');
+  const endHint    = document.getElementById('end-hint');
+  const refreshDurHint = () => {
+    const dur = durationFromTimes(startInput.value, endInput.value);
+    endHint.textContent = dur ? 'Duration: ' + formatDuration(dur) : '';
+  };
+  startInput.addEventListener('input', refreshDurHint);
+  endInput.addEventListener('input', refreshDurHint);
+
+  // Build the (possibly edited) event from the form and open Calendar.
+  const submit = () => {
+    const start = valueOf('f-time')    || null;
+    const end   = valueOf('f-endtime') || null;
+    const edited = {
+      title:            valueOf('f-title')    || 'Event',
+      date:             valueOf('f-date')     || null,
+      time:             start,
+      duration_minutes: durationFromTimes(start, end) || event.duration_minutes || null,
+      location:         valueOf('f-location') || null,
+      description:      valueOf('f-desc')     || null,
+    };
+    openGoogleCalendar(edited);
+  };
+
+  document.getElementById('add-cal-btn').addEventListener('click', submit);
+  document.getElementById('event-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submit();
   });
 
   document.getElementById('dismiss-btn').addEventListener('click', async () => {
     await chrome.storage.local.set({ status: 'idle', event: null });
     renderIdle();
   });
+}
+
+function valueOf(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+// Start time ("HH:MM") + duration → end time ("HH:MM"), defaulting to 1h.
+function computeEndTime(time, durationMinutes) {
+  if (!time) return '';
+  const [h, m] = time.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return '';
+  const end = new Date(2000, 0, 1, h, m + (durationMinutes || 60));
+  return `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+}
+
+// Minutes between two "HH:MM" times; wraps past midnight so it's always positive.
+function durationFromTimes(start, end) {
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some(isNaN)) return null;
+  let d = (eh * 60 + em) - (sh * 60 + sm);
+  if (d <= 0) d += 24 * 60;
+  return d;
+}
+
+// Confidence as a 0–100 number. Prefer a numeric score from the model
+// (confidence_score); otherwise map the categorical high/medium/low.
+function confidencePercent(event) {
+  const raw = event.confidence_score;
+  if (typeof raw === 'number' && isFinite(raw)) {
+    return Math.max(0, Math.min(100, Math.round(raw)));
+  }
+  const map = { high: 92, medium: 66, low: 34 };
+  return map[event.confidence] ?? 66;
+}
+
+// Colour band for the bar fill.
+function confidenceLevel(pct) {
+  if (pct >= 80) return 'high';
+  if (pct >= 50) return 'medium';
+  return 'low';
 }
 
 function renderNoEvent(reason) {

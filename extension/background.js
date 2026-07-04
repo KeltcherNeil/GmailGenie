@@ -20,7 +20,8 @@ If an event or meeting is found:
   "duration_minutes": integer or null,
   "location": "location string or null",
   "description": "one-sentence description or null",
-  "confidence": "high" | "medium" | "low"
+  "confidence": "high" | "medium" | "low",
+  "confidence_score": integer 0-100 (how sure you are this is a real, actionable event)
 }
 
 If no scheduling information is found:
