@@ -312,12 +312,20 @@ function renderError(msg) {
 
 // ── Settings panel ───────────────────────────────────────────────────────────
 
+// The settings panel replaces the main view rather than stacking below it —
+// otherwise the taller event form pushes it past the popup's max height, so it
+// opens off-screen and looks like nothing happened.
+function setSettingsOpen(open) {
+  settingsPanel.classList.toggle('hidden', !open);
+  mainContent.classList.toggle('hidden', open);
+}
+
 settingsBtn.addEventListener('click', () => {
-  settingsPanel.classList.toggle('hidden');
+  setSettingsOpen(settingsPanel.classList.contains('hidden'));
 });
 
 cancelBtn.addEventListener('click', () => {
-  settingsPanel.classList.add('hidden');
+  setSettingsOpen(false);
 });
 
 saveKeyBtn.addEventListener('click', async () => {
@@ -325,7 +333,7 @@ saveKeyBtn.addEventListener('click', async () => {
   // Ignore if the user hasn't typed anything (still showing masked dots)
   if (!val || val.startsWith('•')) return;
   await saveApiKey(val);
-  settingsPanel.classList.add('hidden');
+  setSettingsOpen(false);
 });
 
 apiKeyInput.addEventListener('keydown', async (e) => {
@@ -333,7 +341,7 @@ apiKeyInput.addEventListener('keydown', async (e) => {
     const val = e.target.value.trim();
     if (!val || val.startsWith('•')) return;
     await saveApiKey(val);
-    settingsPanel.classList.add('hidden');
+    setSettingsOpen(false);
   }
 });
 
