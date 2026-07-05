@@ -139,12 +139,39 @@ FLASK_ENV=development
 
 ## Running the Project Locally
 
-**Start the Python backend:**
+### Running the backend server (shell)
+
+The backend must be running whenever you use the extension's **Add to Calendar**
+button — that button POSTs to `http://localhost:5001/create-event`. If it isn't
+running, the popup shows "Could not reach the GmailGenie backend."
+
+**One-time setup — create the virtualenv and install dependencies:**
 ```bash
-cd backend
-pip install -r requirements.txt
-python app.py
-# Server runs at http://localhost:5001
+cd /Users/neilkeltcher/GmailGenie          # repo root
+python3 -m venv .venv                        # creates .venv/ (gitignored)
+./.venv/bin/pip install -r backend/requirements.txt
+```
+
+**Start the server:**
+```bash
+cd /Users/neilkeltcher/GmailGenie/backend
+../.venv/bin/python app.py
+# → "Running on http://127.0.0.1:5001"
+```
+Keep this terminal window **open** — the server runs only as long as the shell is
+running. Do your testing in Gmail with this window left open in the background.
+
+**Stop the server:**
+- In the same terminal window, press **`Ctrl+C`**, or simply **close the window**.
+- If it's running detached / you lost the window, find and kill it by port:
+  ```bash
+  lsof -nP -iTCP:5001 -sTCP:LISTEN     # shows the PID in the last column
+  kill <PID>                            # stop that process
+  ```
+
+**Check whether it's running:**
+```bash
+curl -s http://localhost:5001/health   # prints {"status":"ok"} when up
 ```
 
 > **macOS note:** the backend defaults to port **5001**, not 5000. macOS's AirPlay
