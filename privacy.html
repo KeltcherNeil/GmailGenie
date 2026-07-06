@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GmailGenie — Privacy Policy</title>
+  <style>
+    :root { --ink:#1f2430; --soft:#5b6270; --line:#e6e8ee; --accent:#2575fc; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #f7f8fc; color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    main {
+      max-width: 760px; margin: 0 auto; padding: 48px 24px 80px;
+      background: #fff; min-height: 100vh;
+    }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    h2 { font-size: 18px; margin: 32px 0 8px; }
+    .eff { color: var(--soft); font-size: 14px; margin-bottom: 24px; }
+    p, li { color: var(--ink); }
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+    a { color: var(--accent); }
+    code { background: #eef1f7; padding: 1px 5px; border-radius: 5px; font-size: 90%; }
+    hr { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
+    .contact { background: #f0f5ff; border: 1px solid #d6e4ff; border-radius: 10px; padding: 14px 16px; }
+    footer { color: var(--soft); font-size: 13px; margin-top: 40px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>GmailGenie — Privacy Policy</h1>
+  <p class="eff"><strong>Effective date:</strong> July 6, 2026</p>
+
+  <p>GmailGenie is a Chrome extension that detects scheduling information in the Gmail
+  email you are currently viewing and helps you add it to Google Calendar with one click.
+  This policy explains what data the extension handles, where it goes, and how long it is kept.</p>
+
+  <h2>What data we access</h2>
+  <ul>
+    <li><strong>Content of the open email.</strong> When you open an email in Gmail, GmailGenie
+      reads that message's subject, body text, and sender address from the page so it can look
+      for meetings, appointments, and events. It only reads the message you are actively viewing —
+      it does not read your inbox, other messages, contacts, or attachments.</li>
+    <li><strong>Your Google account identity and Calendar access.</strong> With your consent,
+      GmailGenie uses Google Sign-In (OAuth) to (a) confirm you are a signed-in user of this
+      extension, and (b) create events on your Google Calendar when you click "Add to Calendar."
+      The requested scopes are <code>openid</code>, <code>email</code>, and
+      <code>https://www.googleapis.com/auth/calendar.events</code> (create/edit calendar events).</li>
+  </ul>
+
+  <h2>How your data is used and shared</h2>
+  <ul>
+    <li><strong>Event detection.</strong> The text of the open email is sent over HTTPS to the
+      GmailGenie backend service (hosted on Google Cloud Run, US region), which forwards it to
+      <strong>Anthropic's Claude API</strong> to identify event details (title, date, time,
+      location). Anthropic processes the text to return that result. See
+      <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a>.</li>
+    <li><strong>Calendar event creation.</strong> When you approve an event, it is sent
+      <strong>directly from your browser to the Google Calendar API</strong> using your own OAuth
+      token. It does not pass through the GmailGenie backend.</li>
+    <li><strong>We do not</strong> sell your data, use it for advertising, or use it to build user
+      profiles. There are no third-party analytics or trackers in the extension.</li>
+  </ul>
+
+  <h2>Data retention</h2>
+  <ul>
+    <li><strong>Server side:</strong> The GmailGenie backend processes email text in memory to
+      fulfill a single request and <strong>does not store or log the content of your emails</strong>.
+      Nothing about the message is persisted after the response is returned.</li>
+    <li><strong>On your device:</strong> Detected events and your extension settings are stored
+      locally in the browser (<code>chrome.storage.local</code>) so the popup can display them.
+      This data stays on your device and is cleared when you navigate away, dismiss it, or remove
+      the extension.</li>
+    <li><strong>Google token:</strong> Your OAuth token is managed and cached by Chrome
+      (<code>chrome.identity</code>) and refreshed automatically; GmailGenie does not store it
+      separately.</li>
+  </ul>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>You can decline or revoke Google access at any time at
+      <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> —
+      extraction and calendar creation stop working until you reconnect.</li>
+    <li>Uninstalling the extension removes all locally stored data.</li>
+  </ul>
+
+  <h2>Data we do NOT collect</h2>
+  <p>Passwords, other Gmail messages, contacts, browsing history, or payment information.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>We may update this policy; the "Effective date" above will change accordingly. Material
+  changes will be reflected in the extension's store listing.</p>
+
+  <h2>Contact</h2>
+  <p class="contact">Questions or requests: <strong><a href="mailto:keltcher.n@northeastern.edu">keltcher.n@northeastern.edu</a></strong></p>
+
+  <footer>GmailGenie · <a href="https://github.com/KeltcherNeil/GmailGenie">github.com/KeltcherNeil/GmailGenie</a></footer>
+</main>
+</body>
+</html>
