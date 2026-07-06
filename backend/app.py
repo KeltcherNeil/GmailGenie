@@ -130,6 +130,7 @@ def extract_event_route():
     subject = (data.get('subject') or '').strip()
     body    = (data.get('body')    or '').strip()
     sender  = (data.get('sender')  or '').strip()
+    today   = (data.get('today')   or '').strip()  # requester's local date (for relative dates)
 
     if not body:
         return jsonify({'error': "Missing required field: 'body'"}), 400
@@ -138,7 +139,7 @@ def extract_event_route():
     cleaned_body = clean_email(body)
 
     try:
-        event = extract_event(subject=subject, body=cleaned_body, sender=sender)
+        event = extract_event(subject=subject, body=cleaned_body, sender=sender, today=today)
         return jsonify(event), 200
 
     except ValueError as exc:

@@ -21,6 +21,15 @@ let currentJobId = null;
 const CALENDAR_API_URL =
   'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all';
 
+// The user's LOCAL date (e.g. "Wednesday, July 08, 2026"), sent so the backend can
+// resolve relative dates like "this Thursday" against the user's calendar, not the
+// server's UTC clock.
+function localTodayString() {
+  return new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+}
+
 // POST the email text to the hosted backend, which cleans it, calls Claude with
 // the operator's key, and returns the structured event JSON.
 async function extractEvent(emailData) {
@@ -33,6 +42,7 @@ async function extractEvent(emailData) {
         subject: emailData.subject || '',
         sender:  emailData.sender || '',
         body:    emailData.body || '',
+        today:   localTodayString(),
       }),
     });
   } catch (err) {

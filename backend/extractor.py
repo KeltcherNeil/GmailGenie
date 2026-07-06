@@ -50,16 +50,19 @@ If no scheduling information is found, return:
 {"event_found": false}
 
 Rules:
-- confidence=high   → explicit date AND time are stated
-- confidence=medium → date or time stated, but not both
-- confidence=low    → vague reference ("sometime next week", "soon")
+- confidence=high   → you can determine BOTH a specific calendar date and a time
+- confidence=medium → only one of date/time can be determined
+- confidence=low    → only a vague reference ("sometime next week", "soon")
 - Convert 12-hour times to 24-hour (e.g. 2:30 PM → 14:30)
-- If only a day name is given (e.g. "Thursday"), set date=null and note the day in description
+- Resolve relative dates to an actual YYYY-MM-DD using the provided today's date.
+  "tomorrow", "this Thursday", "next Monday", "in two weeks", a bare day name like
+  "Thursday" → the concrete date, choosing the nearest FUTURE occurrence.
+  Only set date=null when no date can be inferred at all (e.g. "sometime soon").
 - Extract attendee email addresses only — ignore names without addresses\
 """
 
 
-def extract_event(subject: str, body: str, sender: str = '') -> dict:
+def extract_event(subject: str, body: str, sender: str = '', today: str = '') -> dict:
     """
     Send cleaned email text to Claude and return the extracted event as a dict.
 
@@ -67,6 +70,10 @@ def extract_event(subject: str, body: str, sender: str = '') -> dict:
         subject: Email subject line.
         body:    Cleaned email body (run through email_cleaner first).
         sender:  Sender email address (optional, helps with attendee detection).
+        today:   The requester's LOCAL date as a human string
+                 (e.g. "Wednesday, June 25, 2026"), used to resolve relative dates
+                 like "this Thursday". Falls back to the server's UTC date if empty
+                 — but the server runs in UTC, so prefer sending the client's date.
 
     Returns:
         Dict matching the response schema defined in CLAUDE.md.
@@ -75,7 +82,8 @@ def extract_event(subject: str, body: str, sender: str = '') -> dict:
         ValueError: If Claude returns output that cannot be parsed as JSON.
         anthropic.APIError: On API-level failures (propagated to caller).
     """
-    today = date.today().strftime('%A, %B %d, %Y')  # e.g. "Wednesday, June 25, 2026"
+    # Prefer the client-supplied local date; fall back to the server's (UTC) date.
+    today = today.strip() or date.today().strftime('%A, %B %d, %Y')
 
     email_text = f"Subject: {subject}\n"
     if sender:
