@@ -45,6 +45,7 @@ function render(data) {
     case 'done':
       (events && events.length) ? renderEvents(events) : renderNoEvent('done');
       break;
+    case 'auth_required': renderAuthRequired(); break;
     case 'error':   renderError(error);   break;
     case 'idle':    renderIdle();          break;
     default:        renderIdle();
@@ -270,6 +271,35 @@ function renderNoEvent(reason) {
       <p class="sub">Open an email that mentions a meeting, appointment, or event.</p>
     </div>
   `;
+}
+
+// Shown when the backend requires a signed-in Google user (production) and the
+// user hasn't connected yet. Connecting also grants the Calendar scope used later.
+function renderAuthRequired() {
+  mainContent.innerHTML = `
+    <div class="empty-view">
+      <div class="empty-icon">&#128273;</div>
+      <p>Connect your Google account to let GmailGenie scan this email and add events to your calendar.</p>
+      <button id="connect-google-btn" class="btn primary">Connect Google Account</button>
+      <p class="sub">You only need to do this once. GmailGenie uses your account solely to read the open email and create events you approve.</p>
+    </div>
+  `;
+
+  document.getElementById('connect-google-btn').addEventListener('click', async () => {
+    renderProcessing();
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({ type: 'CONNECT_GOOGLE' });
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    // On success the background re-scans and updates status → storage.onChanged
+    // re-renders. On failure, fall back to the connect prompt.
+    if (!result || !result.ok) {
+      renderAuthRequired();
+      if (result && result.error) showActionError(document.getElementById('connect-google-btn'), result.error);
+    }
+  });
 }
 
 function renderIdle() {

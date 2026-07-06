@@ -1,33 +1,28 @@
 {
   "manifest_version": 3,
   "name": "GmailGenie",
-  "version": "0.2.0",
-  "description": "Detects scheduling info in Gmail and Outlook emails and suggests Google Calendar events.",
-  "permissions": ["storage", "tabs", "identity"],
+  "version": "1.0.0",
+  "description": "Detects scheduling info in your Gmail and adds it to Google Calendar in one click.",
+  "permissions": ["storage", "activeTab", "identity"],
   "host_permissions": [
     "https://mail.google.com/*",
-    "https://outlook.live.com/*",
-    "https://outlook.office.com/*",
-    "https://outlook.office365.com/*",
-    "http://localhost:5001/*",
     "https://gmailgenie-485353812643.us-central1.run.app/*",
-    "https://www.googleapis.com/*"
+    "https://www.googleapis.com/calendar/v3/*"
   ],
   "oauth2": {
     "client_id": "262145028639-cc2t5r3e8374b9ginju3psgroq2ns0bt.apps.googleusercontent.com",
-    "scopes": ["https://www.googleapis.com/auth/calendar.events"]
+    "scopes": [
+      "openid",
+      "email",
+      "https://www.googleapis.com/auth/calendar.events"
+    ]
   },
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://mail.google.com/*",
-        "https://outlook.live.com/*",
-        "https://outlook.office.com/*",
-        "https://outlook.office365.com/*"
-      ],
+      "matches": ["https://mail.google.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

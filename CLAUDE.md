@@ -26,6 +26,7 @@ gmailgenie/
 │   ├── app.py                  # Main Flask app and API routes
 │   ├── extractor.py            # AI-powered event extraction logic
 │   ├── email_cleaner.py        # Preprocessing/cleaning email text
+│   ├── auth.py                 # Per-user Google token verification (Phase 2)
 │   └── requirements.txt        # Python dependencies
 │
 ├── tests/                      # Test files
@@ -138,14 +139,18 @@ Python Backend (app.py)
 
 ## Environment Variables
 
-Create a `.env` file in the `backend/` directory:
+Create a `.env` file in the `backend/` directory (see `.env.example`):
 
 ```
-ANTHROPIC_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here      # required — server-side Claude key
+ALLOWED_ORIGINS=chrome-extension://<id>   # prod: origins allowed to call /extract-event (unset = check disabled)
+GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com  # prod: per-user auth; must match manifest oauth2.client_id (unset = auth disabled)
 FLASK_ENV=development
 ```
-(Google OAuth is configured in the extension's `manifest.json`, not here — the backend does no
-Google auth.)
+Both `ALLOWED_ORIGINS` and `GOOGLE_CLIENT_ID` disable their check when unset, for
+local dev. **Never deploy to production with either unset.** The extension's Google
+OAuth client is configured in `manifest.json`; the backend verifies tokens minted for
+that same client (`backend/auth.py`).
 
 ---
 
@@ -207,6 +212,44 @@ curl -s http://localhost:5001/health   # prints {"status":"ok"} when up
 2. Enable Developer Mode
 3. Click Load Unpacked → select the `extension/` folder
 4. Open Gmail and open any email to test
+
+---
+
+## Deploying changes to production
+
+> **Gotcha (this bites every time):** the installed extension talks to the **hosted
+> Cloud Run backend**, not localhost — `BACKEND_URL` in `extension/background.js`
+> points at the `run.app` URL. So editing the prompt / `extractor.py` /
+> `email_cleaner.py` locally changes **nothing the browser sees** until you redeploy.
+> A change is only live once BOTH steps below are done.
+
+**1. Redeploy the backend** — for any change under `backend/` (including the prompt):
+```bash
+cd /Users/neilkeltcher/GmailGenie
+gcloud run deploy gmailgenie --source backend --region us-central1 --allow-unauthenticated
+```
+Existing env vars and the `anthropic-key` secret are **preserved** across deploys —
+do not pass `--set-env-vars` unless you intend to replace the whole set.
+
+**2. Reload the extension** — for any change under `extension/`:
+`chrome://extensions` → GmailGenie → ↻ reload → reopen the email (or click
+"Scan current email" in the popup).
+
+**Deployed service (current):**
+
+| | |
+|---|---|
+| Project | `gmailgenie-neil-4821` |
+| Service / region | `gmailgenie` / `us-central1` |
+| URL | `https://gmailgenie-485353812643.us-central1.run.app` |
+| Anthropic key | Secret Manager secret `anthropic-key` (not a plain env var) |
+| `ALLOWED_ORIGINS` | `chrome-extension://mhcloobbehmmanfjdcejglmndcogejjp` |
+
+**Verify a deploy:**
+```bash
+curl -s https://gmailgenie-485353812643.us-central1.run.app/health   # → {"status":"ok"}
+```
+See `backend/DEPLOY.md` for first-time setup, secrets, and hardening.
 
 ---
 
@@ -307,7 +350,7 @@ touches Google Calendar.
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
 - Calendar creation is **fully client-side** (`chrome.identity` + direct Calendar API) — no server needed. OAuth tokens are cached and refreshed by Chrome automatically.
-- Extraction runs **server-side**: `background.js` POSTs email text to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by an `ALLOWED_ORIGINS` allowlist + per-IP rate limiting (Phase 1); per-user Google-identity auth is the planned Phase 2. Deploy: `backend/DEPLOY.md`.
+- Extraction runs **server-side**: `background.js` POSTs email text (plus the user's Google token) to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by (1) an `ALLOWED_ORIGINS` allowlist, (2) **per-user Google-identity auth** (`auth.py` — the caller must present a token minted for this extension's OAuth client), and (3) rate limiting (per account when authed, else per IP). When `GOOGLE_CLIENT_ID` is set, an unauthenticated call gets 401 and the popup shows a "Connect Google" prompt. Deploy: `backend/DEPLOY.md`.
 - Emails with several scheduling requests now return **all** of them (`events` array);
   the popup shows a stacked list and the floating card lists each with its own button
 - Timezone: events are created in the user's browser timezone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The email's own stated timezone, if different, is not yet parsed.
@@ -323,10 +366,11 @@ touches Google Calendar.
 
 ### Outlook — Microsoft Graph API integration
 
-Currently the extension reads Outlook by scraping the DOM when Outlook web is open in Chrome.
-This does NOT work in the native Outlook desktop app.
-
-The proper fix is to replace the DOM scraper with **Microsoft Graph API** calls:
+**Outlook support was removed for the v1 public launch** — the manifest and
+`content.js` are Gmail-only. The earlier Outlook DOM-scraper was fragile (broke on
+Outlook updates, didn't work in the native desktop app) and widened host permissions
+for store review. If Outlook comes back, do it properly with the **Microsoft Graph
+API** rather than DOM scraping:
 
 **User experience:**
 - Gmail: zero setup (DOM reading, no auth)

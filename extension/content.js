@@ -1,19 +1,6 @@
-// content.js — Reads email DOM on Gmail and Outlook, sends data to background.js
+// content.js — Reads the open Gmail email from the DOM and sends it to background.js
 
-// ── Platform detection ────────────────────────────────────────────────────────
-
-const PLATFORM = (() => {
-  const h = window.location.hostname;
-  if (h === 'mail.google.com') return 'gmail';
-  if (h.includes('outlook')) return 'outlook';
-  return null;
-})();
-
-if (!PLATFORM) {
-  throw new Error('GmailGenie: unsupported host, content script exiting.');
-}
-
-// ── Shared state ──────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 
 let lastEmailId  = null;
 let debounceTimer = null;
@@ -78,92 +65,11 @@ function getGmailContent() {
   return { subject, body: body.substring(0, 8000), sender, platform: 'gmail' };
 }
 
-// ── Outlook helpers ───────────────────────────────────────────────────────────
-
-function getOutlookEmailId() {
-  // Full-screen view: URL contains /id/<messageId>
-  const urlMatch = window.location.href.match(/\/id\/([A-Za-z0-9%_=+/-]{10,})/i);
-  if (urlMatch) return decodeURIComponent(urlMatch[1]).substring(0, 60);
-
-  // Reading-pane view: URL doesn't change — use a fingerprint of the body text
-  const bodyEl = getOutlookBodyEl();
-  if (!bodyEl) return null;
-  const snippet = bodyEl.innerText.trim().substring(0, 80);
-  return snippet.length > 10 ? btoa(encodeURIComponent(snippet)).substring(0, 30) : null;
-}
-
-function getOutlookBodyEl() {
-  // Outlook uses aria-label reliably across consumer and enterprise versions
-  const selectors = [
-    '[aria-label="Message body"]',
-    'div[class*="ReadingPane"] [role="document"]',
-    '[data-app-section="ConversationContainer"] [role="document"]',
-  ];
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el && el.innerText.trim().length > 20) return el;
-  }
-  return null;
-}
-
-function getOutlookSubject() {
-  // Try attribute-based selectors first (more stable than class names)
-  const candidates = [
-    document.querySelector('[data-testid="subject"]'),
-    document.querySelector('[aria-label^="Subject:"]'),
-    document.querySelector('[class*="subject" i]'),
-    document.querySelector('[class*="Subject" i]'),
-  ];
-  for (const el of candidates) {
-    if (el && el.innerText.trim()) return el.innerText.trim();
-  }
-
-  // Fall back to page title: "My Subject - Outlook" or "My Subject - Mail"
-  const title = document.title || '';
-  const stripped = title.replace(/\s*[-–|]\s*(Outlook|Mail|Microsoft Outlook)\s*$/i, '').trim();
-  return stripped || 'Email';
-}
-
-function getOutlookSender() {
-  // Outlook renders sender info with aria-label or data attributes
-  const fromEl = document.querySelector('[aria-label^="From"]') ||
-                 document.querySelector('[data-testid="senderName"]');
-  if (fromEl) return fromEl.innerText.trim();
-
-  // Outlook sometimes puts sender email in a mailto link
-  const mailtoEl = document.querySelector('a[href^="mailto:"]');
-  if (mailtoEl) return mailtoEl.href.replace('mailto:', '').split('?')[0];
-
-  return '';
-}
-
-function getOutlookContent() {
-  const bodyEl = getOutlookBodyEl();
-  if (!bodyEl) return null;
-
-  const body    = bodyEl.innerText.trim();
-  const subject = getOutlookSubject();
-  const sender  = getOutlookSender();
-
-  if (!body || body.length < 10) return null;
-
-  // See the Gmail note above — cap generously so trailing scheduling info survives.
-  return { subject, body: body.substring(0, 8000), sender, platform: 'outlook' };
-}
-
-// ── Unified check ─────────────────────────────────────────────────────────────
-
-function getCurrentEmailId() {
-  return PLATFORM === 'gmail' ? getGmailEmailId() : getOutlookEmailId();
-}
-
-function getCurrentEmailContent() {
-  return PLATFORM === 'gmail' ? getGmailContent() : getOutlookContent();
-}
+// ── Email-change detection ────────────────────────────────────────────────────
 
 function checkForEmailChange() {
-  const currentId = getCurrentEmailId();
-  console.log('[GmailGenie] check — platform:', PLATFORM, 'id:', currentId, 'last:', lastEmailId);
+  const currentId = getGmailEmailId();
+  console.log('[GmailGenie] check — id:', currentId, 'last:', lastEmailId);
 
   if (!currentId) {
     // Not in an email view — reset so the popup shows idle state
@@ -176,7 +82,7 @@ function checkForEmailChange() {
 
   if (currentId === lastEmailId) return; // Same email, nothing to do
 
-  const emailData = getCurrentEmailContent();
+  const emailData = getGmailContent();
   if (!emailData) return; // Content not loaded yet — observer will fire again
 
   lastEmailId = currentId;
@@ -233,10 +139,7 @@ function onNavigate() {
 // Gmail: hash-based routing
 window.addEventListener('hashchange', onNavigate);
 
-// Outlook: uses History API (pushState / replaceState)
-window.addEventListener('popstate', onNavigate);
-
-// Both: catch framework-driven URL changes and lazy-loaded content
+// Catch framework-driven URL changes and lazy-loaded content
 let lastHref = location.href;
 const observer = new MutationObserver(() => {
   if (location.href !== lastHref) {

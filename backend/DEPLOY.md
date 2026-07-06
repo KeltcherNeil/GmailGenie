@@ -26,8 +26,11 @@ gcloud run deploy gmailgenie \
   --source backend \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-...,ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
+  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-...,ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com"
 ```
+
+> Once env vars/secrets are set on the service, later `gcloud run deploy --source backend`
+> calls **preserve** them — omit `--set-env-vars` unless you intend to replace the whole set.
 
 - `--source backend` builds the `backend/Dockerfile` with Cloud Build — no local
   Docker needed.
@@ -59,6 +62,7 @@ curl https://gmailgenie-xxxxxxxx-uc.a.run.app/health   # → {"status":"ok"}
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Server-side Claude key |
 | `ALLOWED_ORIGINS` | yes (prod) | Comma-separated extension origins; disables origin check if unset |
+| `GOOGLE_CLIENT_ID` | yes (prod) | Extension's OAuth client id; callers must present a Google token minted for it (per-user auth). Disables auth if unset. Must equal `manifest.json`'s `oauth2.client_id` |
 | `RATE_LIMITS` | no | Per-IP limits, default `30 per minute;300 per day` |
 | `PORT` | no | Injected by Cloud Run (8080); local dev defaults to 5001 |
 
