@@ -12,19 +12,25 @@ Deployment: this service is meant to run hosted (Google Cloud Run) so end users
 never paste an Anthropic key or run a shell. ANTHROPIC_API_KEY lives in the host's
 environment and never ships in the extension. See DEPLOY.md.
 
-Abuse protection (Phase 1): because /extract-event spends the operator's Anthropic
-credits on every call, it is guarded by (1) an Origin allowlist and (2) per-IP rate
-limiting. A brand-new open endpoint would otherwise let anyone drain the key. Phase 2
-replaces this with per-user Google-identity verification.
+Abuse protection: because /extract-event spends the operator's Anthropic credits on
+every call, it is guarded by three layers:
+  1. Origin allowlist (ALLOWED_ORIGINS) — rejects non-extension origins.
+  2. Per-user Google-identity auth (auth.py, gated on GOOGLE_CLIENT_ID) — the caller
+     must present a Google token minted for THIS extension's OAuth client, so spend
+     is tied to a real signed-in account. This is the primary gate.
+  3. Rate limiting — per Google account when authed, else per IP.
+Both ALLOWED_ORIGINS and GOOGLE_CLIENT_ID are disabled when unset (local dev); NEVER
+deploy to production without both set. See DEPLOY.md.
 """
 
 import os
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 
+import auth
 from email_cleaner import clean_email
 from extractor import extract_event
 
@@ -62,6 +68,24 @@ limiter = Limiter(
 )
 
 
+def _rate_key() -> str:
+    """
+    Rate-limit key for /extract-event. When auth is enabled, authenticate the
+    caller once here (result cached on flask.g for the view to reuse) and limit
+    per Google account; otherwise fall back to per-IP (dev / auth disabled).
+    """
+    if not auth.auth_enabled():
+        return get_remote_address()
+    token = auth.bearer_token(request.headers.get('Authorization', ''))
+    user_id = auth.verify_token(token) if token else None
+    g.gg_user = user_id  # None → the view returns 401
+    return f'user:{user_id}' if user_id else f'anon:{get_remote_address()}'
+
+
+def _is_preflight() -> bool:
+    return request.method == 'OPTIONS'
+
+
 # ── CORS + origin allowlist ────────────────────────────────────────────────────
 # The Chrome extension calls this backend from a background service worker. We echo
 # CORS headers so the request works regardless of how Chrome classifies it, but we
@@ -77,7 +101,7 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     return response
 
 
@@ -96,7 +120,7 @@ def health():
 # ── Event extraction ─────────────────────────────────────────────────────────
 
 @app.route('/extract-event', methods=['POST', 'OPTIONS'])
-@limiter.limit(RATE_LIMITS)
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
 def extract_event_route():
     """
     Extract scheduling information from a raw email.
@@ -121,6 +145,12 @@ def extract_event_route():
     if not _origin_allowed(origin):
         app.logger.warning('Rejected request from disallowed origin: %r', origin)
         return jsonify({'error': 'Origin not allowed'}), 403
+
+    # Per-user auth (skipped in dev when GOOGLE_CLIENT_ID is unset). _rate_key()
+    # already verified the token and stashed the result on g; reuse it here. A 401
+    # tells the extension to prompt the user to connect their Google account.
+    if auth.auth_enabled() and not getattr(g, 'gg_user', None):
+        return jsonify({'error': 'Google sign-in required'}), 401
 
     data = request.get_json(silent=True)
 

@@ -26,6 +26,7 @@ gmailgenie/
 │   ├── app.py                  # Main Flask app and API routes
 │   ├── extractor.py            # AI-powered event extraction logic
 │   ├── email_cleaner.py        # Preprocessing/cleaning email text
+│   ├── auth.py                 # Per-user Google token verification (Phase 2)
 │   └── requirements.txt        # Python dependencies
 │
 ├── tests/                      # Test files
@@ -48,7 +49,7 @@ gmailgenie/
 | Extension styling | Plain CSS |
 | Backend language | Python 3.11+ |
 | Backend framework | Flask |
-| AI model | Claude API (claude-sonnet-4-6) |
+| AI model | Claude API (see `MODEL` in `backend/extractor.py`) |
 | Calendar integration | Google Calendar API v3 |
 | Auth | Google OAuth 2.0 |
 
@@ -90,22 +91,35 @@ Python Backend (app.py)
 - All routes live in `app.py`, logic lives in separate helper modules
 - AI extraction logic belongs in `extractor.py`, not in `app.py`
 - Always clean email text before sending to the AI (remove quoted replies, signatures)
-- The AI should always return JSON — if no event is found, return `{"event_found": false}`
+- The AI always returns JSON. A single email can contain **zero, one, or several**
+  events, so the response is always an `events` array — an empty array means none.
 - Never hardcode API keys — always use environment variables via `python-dotenv`
-- All responses from the backend should follow this structure:
+- All responses from the backend follow this structure:
 
 ```json
 {
-  "event_found": true,
-  "title": "Project sync",
-  "date": "2024-03-15",
-  "time": "14:00",
-  "duration_minutes": 60,
-  "attendees": ["alice@example.com"],
-  "location": "Zoom",
-  "confidence": "high"
+  "events": [
+    {
+      "title": "Project sync",
+      "date": "2024-03-15",
+      "time": "14:00",
+      "duration_minutes": 60,
+      "attendees": ["alice@example.com"],
+      "location": "Zoom",
+      "description": "one-sentence summary or null",
+      "confidence": "high"
+    }
+  ]
 }
 ```
+
+- `extractor._normalize()` coerces older single-event shapes (`{"event_found": …}`)
+  into the `events` array, and `background.js`'s `normalizeEvents()` does the same on
+  the client — so a stale backend/extension during a deploy still works.
+- Extraction must scan the **whole** email and ignore narrative/past content (recaps,
+  sports scores, results). Because scheduling info often sits at the very end of a long
+  message, the body-length caps (`content.js` ~8000, `email_cleaner` ~6000) are kept
+  generous so trailing events are not truncated away before the AI sees them.
 
 ### JavaScript Extension
 
@@ -125,14 +139,18 @@ Python Backend (app.py)
 
 ## Environment Variables
 
-Create a `.env` file in the `backend/` directory:
+Create a `.env` file in the `backend/` directory (see `.env.example`):
 
 ```
-ANTHROPIC_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here      # required — server-side Claude key
+ALLOWED_ORIGINS=chrome-extension://<id>   # prod: origins allowed to call /extract-event (unset = check disabled)
+GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com  # prod: per-user auth; must match manifest oauth2.client_id (unset = auth disabled)
 FLASK_ENV=development
 ```
-(Google OAuth is configured in the extension's `manifest.json`, not here — the backend does no
-Google auth.)
+Both `ALLOWED_ORIGINS` and `GOOGLE_CLIENT_ID` disable their check when unset, for
+local dev. **Never deploy to production with either unset.** The extension's Google
+OAuth client is configured in `manifest.json`; the backend verifies tokens minted for
+that same client (`backend/auth.py`).
 
 ---
 
@@ -194,6 +212,44 @@ curl -s http://localhost:5001/health   # prints {"status":"ok"} when up
 2. Enable Developer Mode
 3. Click Load Unpacked → select the `extension/` folder
 4. Open Gmail and open any email to test
+
+---
+
+## Deploying changes to production
+
+> **Gotcha (this bites every time):** the installed extension talks to the **hosted
+> Cloud Run backend**, not localhost — `BACKEND_URL` in `extension/background.js`
+> points at the `run.app` URL. So editing the prompt / `extractor.py` /
+> `email_cleaner.py` locally changes **nothing the browser sees** until you redeploy.
+> A change is only live once BOTH steps below are done.
+
+**1. Redeploy the backend** — for any change under `backend/` (including the prompt):
+```bash
+cd /Users/neilkeltcher/GmailGenie
+gcloud run deploy gmailgenie --source backend --region us-central1 --allow-unauthenticated
+```
+Existing env vars and the `anthropic-key` secret are **preserved** across deploys —
+do not pass `--set-env-vars` unless you intend to replace the whole set.
+
+**2. Reload the extension** — for any change under `extension/`:
+`chrome://extensions` → GmailGenie → ↻ reload → reopen the email (or click
+"Scan current email" in the popup).
+
+**Deployed service (current):**
+
+| | |
+|---|---|
+| Project | `gmailgenie-neil-4821` |
+| Service / region | `gmailgenie` / `us-central1` |
+| URL | `https://gmailgenie-485353812643.us-central1.run.app` |
+| Anthropic key | Secret Manager secret `anthropic-key` (not a plain env var) |
+| `ALLOWED_ORIGINS` | `chrome-extension://mhcloobbehmmanfjdcejglmndcogejjp` |
+
+**Verify a deploy:**
+```bash
+curl -s https://gmailgenie-485353812643.us-central1.run.app/health   # → {"status":"ok"}
+```
+See `backend/DEPLOY.md` for first-time setup, secrets, and hardening.
 
 ---
 
@@ -260,17 +316,17 @@ tried to detect the save and close the tab. It was unreliable and has been delet
 - `extension/popup.js` → `createEvent()` — sends `CREATE_EVENT`, renders the button states.
 - `extension/content.js` → `createEventFromCard()` — same for the floating card.
 - `extension/background.js` → `CREATE_EVENT` handler + `createCalendarEvent()` — gets the OAuth
-  token via `chrome.identity` and calls the Google Calendar API directly. `buildEventBody()` ports
-  the old `calendar_helper.build_event_body()` to JS (with real timezone via `Intl`).
+  token via `chrome.identity` and calls the Google Calendar API directly. `buildEventBody()`
+  builds the Calendar API event resource (with real timezone via `Intl`).
 - `extension/manifest.json` → `oauth2` block (client ID + `calendar.events` scope) and the
   `identity` permission.
 
 **Requirement:** a Google OAuth **Chrome-Extension** client ID must be set in `manifest.json`'s
 `oauth2.client_id` (see "Google OAuth setup" below). Each user consents once in their own browser;
-Chrome caches and refreshes the token automatically. The old server-side calendar code
-(`backend/calendar_helper.py`, `credentials.json`, `token.json`, the `/create-event` route, and
-the Google client libraries in `requirements.txt`) has been **removed** — the backend no longer
-touches Google Calendar.
+Chrome caches and refreshes the token automatically. The old server-side calendar code and its
+OAuth client-secret / token files were **removed** — the backend no longer touches Google Calendar,
+so no Google credentials or tokens live on the server or in this repo. The backend's only secret is
+the Anthropic key, which is held in Secret Manager (never committed).
 
 ---
 
@@ -294,8 +350,9 @@ touches Google Calendar.
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
 - Calendar creation is **fully client-side** (`chrome.identity` + direct Calendar API) — no server needed. OAuth tokens are cached and refreshed by Chrome automatically.
-- Extraction runs **server-side**: `background.js` POSTs email text to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by an `ALLOWED_ORIGINS` allowlist + per-IP rate limiting (Phase 1); per-user Google-identity auth is the planned Phase 2. Deploy: `backend/DEPLOY.md`.
-- Emails with multiple scheduling requests in one thread may only extract the most recent one
+- Extraction runs **server-side**: `background.js` POSTs email text (plus the user's Google token) to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by (1) an `ALLOWED_ORIGINS` allowlist, (2) **per-user Google-identity auth** (`auth.py` — the caller must present a token minted for this extension's OAuth client), and (3) rate limiting (per account when authed, else per IP). When `GOOGLE_CLIENT_ID` is set, an unauthenticated call gets 401 and the popup shows a "Connect Google" prompt. Deploy: `backend/DEPLOY.md`.
+- Emails with several scheduling requests now return **all** of them (`events` array);
+  the popup shows a stacked list and the floating card lists each with its own button
 - Timezone: events are created in the user's browser timezone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The email's own stated timezone, if different, is not yet parsed.
 
 ---
@@ -303,16 +360,17 @@ touches Google Calendar.
 ## Future Improvements (not yet built)
 
 - Availability detection: read existing calendar events and suggest free slots when someone asks "when are you free?"
-- Multi-event extraction: handle emails containing more than one proposed meeting time
+- ~~Multi-event extraction: handle emails containing more than one proposed meeting time~~ ✅ done
 - Confidence scoring: only show the popup when extraction confidence is above a threshold
 - Hosted backend: deploy Flask app to Railway or Render so others can install the extension
 
 ### Outlook — Microsoft Graph API integration
 
-Currently the extension reads Outlook by scraping the DOM when Outlook web is open in Chrome.
-This does NOT work in the native Outlook desktop app.
-
-The proper fix is to replace the DOM scraper with **Microsoft Graph API** calls:
+**Outlook support was removed for the v1 public launch** — the manifest and
+`content.js` are Gmail-only. The earlier Outlook DOM-scraper was fragile (broke on
+Outlook updates, didn't work in the native desktop app) and widened host permissions
+for store review. If Outlook comes back, do it properly with the **Microsoft Graph
+API** rather than DOM scraping:
 
 **User experience:**
 - Gmail: zero setup (DOM reading, no auth)

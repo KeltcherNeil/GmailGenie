@@ -32,12 +32,17 @@ function localTodayString() {
 
 // POST the email text to the hosted backend, which cleans it, calls Claude with
 // the operator's key, and returns the structured event JSON.
-async function extractEvent(emailData) {
+async function extractEvent(emailData, token) {
+  const headers = { 'Content-Type': 'application/json' };
+  // The backend ties extraction spend to a signed-in Google user. Send the
+  // user's own OAuth token so it can verify identity + rate-limit per account.
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
   let res;
   try {
     res = await fetch(`${BACKEND_URL}/extract-event`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         subject: emailData.subject || '',
         sender:  emailData.sender || '',
@@ -53,13 +58,34 @@ async function extractEvent(emailData) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    if (res.status === 401) {
+      // Not signed in (or token rejected) — the popup should prompt to connect.
+      const err = new Error('Google sign-in required');
+      err.code = 'AUTH_REQUIRED';
+      throw err;
+    }
     if (res.status === 429) {
       throw new Error('Rate limit reached — please wait a moment and try again.');
     }
     throw new Error(data.error || `Extraction failed (${res.status})`);
   }
 
-  return data;
+  return normalizeEvents(data);
+}
+
+// The backend returns { events: [ {…}, … ] }. Older builds returned a single
+// { event_found, title, … } object. Coerce either into a plain array of event
+// objects so the rest of the extension only deals with one shape.
+function normalizeEvents(data) {
+  if (Array.isArray(data?.events)) {
+    return data.events.filter((e) => e && typeof e === 'object');
+  }
+  // Legacy single-event shape.
+  if (data && data.event_found) {
+    const { event_found, ...event } = data;
+    return [event];
+  }
+  return [];
 }
 
 async function handleEmailOpened(emailData) {
@@ -70,32 +96,36 @@ async function handleEmailOpened(emailData) {
   await chrome.storage.local.set({
     status: 'processing',
     emailData,
-    event: null,
+    events: null,
     error: null
   });
 
   try {
-    const event = await extractEvent(emailData);
+    // Use a silently-cached Google token if the user has already connected. If
+    // not, we still call the backend: in dev (auth disabled) it works tokenless;
+    // in prod it returns 401, which we surface as an "auth_required" state below.
+    const token = await getAuthTokenSilent();
+    const events = await extractEvent(emailData, token);
 
     if (currentJobId === jobId) {
-      await chrome.storage.local.set({ status: 'done', event, error: null });
+      await chrome.storage.local.set({ status: 'done', events, error: null });
 
-      // Badge mode — put a green dot on the icon to signal an event was found
-      if (event.event_found) {
+      // Badge mode — put a green dot on the icon to signal event(s) were found
+      if (events.length) {
         const { notificationMode = 'none' } = await chrome.storage.local.get('notificationMode');
         if (notificationMode === 'badge') {
-          chrome.action.setBadgeText({ text: '!' });
+          chrome.action.setBadgeText({ text: events.length > 1 ? String(events.length) : '!' });
           chrome.action.setBadgeBackgroundColor({ color: '#188038' });
         }
       }
     }
   } catch (err) {
     if (currentJobId === jobId) {
-      await chrome.storage.local.set({
-        status: 'error',
-        error: err.message,
-        event: null
-      });
+      if (err.code === 'AUTH_REQUIRED') {
+        await chrome.storage.local.set({ status: 'auth_required', error: null, events: null });
+      } else {
+        await chrome.storage.local.set({ status: 'error', error: err.message, events: null });
+      }
     }
   }
 }
@@ -111,11 +141,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
+  } else if (message.type === 'CONNECT_GOOGLE') {
+    // User clicked "Connect Google" in the popup. Interactive sign-in, then
+    // re-run extraction on the last email with the freshly cached token.
+    connectGoogleAndRescan()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
   } else if (message.type === 'OPEN_EDITOR') {
     openEditor();
   }
   return false;
 });
+
+// Silently return a cached Google token, or null if the user hasn't connected
+// yet. Never shows UI — safe to call on every email open.
+function getAuthTokenSilent() {
+  return new Promise((resolve) => {
+    chrome.identity.getAuthToken({ interactive: false }, (token) => {
+      void chrome.runtime.lastError; // not signed in yet — not an error here
+      resolve(token || null);
+    });
+  });
+}
+
+// Interactive Google sign-in, then re-extract the stored email so the popup
+// updates from "connect" to the detected events.
+async function connectGoogleAndRescan() {
+  try {
+    await getAuthToken(true);
+  } catch (err) {
+    return { ok: false, error: `Google sign-in failed or was cancelled: ${err.message}` };
+  }
+  const { emailData } = await chrome.storage.local.get('emailData');
+  if (emailData) handleEmailOpened(emailData);
+  return { ok: true };
+}
 
 // Open the editable "main pop up". Prefer the real toolbar popup
 // (chrome.action.openPopup, Chrome 127+); fall back to a small popup window

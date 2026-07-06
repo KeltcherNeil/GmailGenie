@@ -26,8 +26,11 @@ gcloud run deploy gmailgenie \
   --source backend \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-...,ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
+  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-...,ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com"
 ```
+
+> Once env vars/secrets are set on the service, later `gcloud run deploy --source backend`
+> calls **preserve** them — omit `--set-env-vars` unless you intend to replace the whole set.
 
 - `--source backend` builds the `backend/Dockerfile` with Cloud Build — no local
   Docker needed.
@@ -59,6 +62,7 @@ curl https://gmailgenie-xxxxxxxx-uc.a.run.app/health   # → {"status":"ok"}
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Server-side Claude key |
 | `ALLOWED_ORIGINS` | yes (prod) | Comma-separated extension origins; disables origin check if unset |
+| `GOOGLE_CLIENT_ID` | yes (prod) | Extension's OAuth client id; callers must present a Google token minted for it (per-user auth). Disables auth if unset. Must equal `manifest.json`'s `oauth2.client_id` |
 | `RATE_LIMITS` | no | Per-IP limits, default `30 per minute;300 per day` |
 | `PORT` | no | Injected by Cloud Run (8080); local dev defaults to 5001 |
 
@@ -72,9 +76,10 @@ curl https://gmailgenie-xxxxxxxx-uc.a.run.app/health   # → {"status":"ok"}
    multiple instances, the effective limit is `limit × instances`. Good enough as a
    floor; not a hard global cap.
 
-**Phase 2** replaces this with per-user auth: the extension already does Google
-sign-in for Calendar, so pass that Google ID token, verify it here, and rate-limit
-per Google account. That ties spend to a real identity and is the real fix.
+**Phase 2 (implemented):** per-user auth in `auth.py`. The extension sends the user's
+Google token; the backend verifies it was minted for this extension's OAuth client
+(`GOOGLE_CLIENT_ID`) and rate-limits per Google account. Enable it by setting
+`GOOGLE_CLIENT_ID`; leave it unset only for local dev.
 
 ## Hardening (recommended before any real launch)
 
@@ -84,7 +89,7 @@ per Google account. That ties spend to a real identity and is the real fix.
   gcloud run deploy gmailgenie --source backend --region us-central1 \
     --allow-unauthenticated \
     --update-secrets "ANTHROPIC_API_KEY=anthropic-key:latest" \
-    --set-env-vars "ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
+    --set-env-vars "ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com"
   ```
 - **Global rate limits**: point flask-limiter at Redis/Memorystore via a
   `storage_uri` so limits hold across instances.

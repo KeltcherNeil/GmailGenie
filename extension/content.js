@@ -1,19 +1,6 @@
-// content.js — Reads email DOM on Gmail and Outlook, sends data to background.js
+// content.js — Reads the open Gmail email from the DOM and sends it to background.js
 
-// ── Platform detection ────────────────────────────────────────────────────────
-
-const PLATFORM = (() => {
-  const h = window.location.hostname;
-  if (h === 'mail.google.com') return 'gmail';
-  if (h.includes('outlook')) return 'outlook';
-  return null;
-})();
-
-if (!PLATFORM) {
-  throw new Error('GmailGenie: unsupported host, content script exiting.');
-}
-
-// ── Shared state ──────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 
 let lastEmailId  = null;
 let debounceTimer = null;
@@ -72,107 +59,30 @@ function getGmailContent() {
     ? senderEl.getAttribute('email') || senderEl.innerText.trim()
     : '';
 
-  return { subject, body: body.substring(0, 1500), sender, platform: 'gmail' };
+  // Cap generously: scheduling details often sit at the END of a long email/thread,
+  // so a tight cap silently drops them before the backend ever sees them. The
+  // backend's email_cleaner applies the final bound after stripping quotes/signatures.
+  return { subject, body: body.substring(0, 8000), sender, platform: 'gmail' };
 }
 
-// ── Outlook helpers ───────────────────────────────────────────────────────────
-
-function getOutlookEmailId() {
-  // Full-screen view: URL contains /id/<messageId>
-  const urlMatch = window.location.href.match(/\/id\/([A-Za-z0-9%_=+/-]{10,})/i);
-  if (urlMatch) return decodeURIComponent(urlMatch[1]).substring(0, 60);
-
-  // Reading-pane view: URL doesn't change — use a fingerprint of the body text
-  const bodyEl = getOutlookBodyEl();
-  if (!bodyEl) return null;
-  const snippet = bodyEl.innerText.trim().substring(0, 80);
-  return snippet.length > 10 ? btoa(encodeURIComponent(snippet)).substring(0, 30) : null;
-}
-
-function getOutlookBodyEl() {
-  // Outlook uses aria-label reliably across consumer and enterprise versions
-  const selectors = [
-    '[aria-label="Message body"]',
-    'div[class*="ReadingPane"] [role="document"]',
-    '[data-app-section="ConversationContainer"] [role="document"]',
-  ];
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el && el.innerText.trim().length > 20) return el;
-  }
-  return null;
-}
-
-function getOutlookSubject() {
-  // Try attribute-based selectors first (more stable than class names)
-  const candidates = [
-    document.querySelector('[data-testid="subject"]'),
-    document.querySelector('[aria-label^="Subject:"]'),
-    document.querySelector('[class*="subject" i]'),
-    document.querySelector('[class*="Subject" i]'),
-  ];
-  for (const el of candidates) {
-    if (el && el.innerText.trim()) return el.innerText.trim();
-  }
-
-  // Fall back to page title: "My Subject - Outlook" or "My Subject - Mail"
-  const title = document.title || '';
-  const stripped = title.replace(/\s*[-–|]\s*(Outlook|Mail|Microsoft Outlook)\s*$/i, '').trim();
-  return stripped || 'Email';
-}
-
-function getOutlookSender() {
-  // Outlook renders sender info with aria-label or data attributes
-  const fromEl = document.querySelector('[aria-label^="From"]') ||
-                 document.querySelector('[data-testid="senderName"]');
-  if (fromEl) return fromEl.innerText.trim();
-
-  // Outlook sometimes puts sender email in a mailto link
-  const mailtoEl = document.querySelector('a[href^="mailto:"]');
-  if (mailtoEl) return mailtoEl.href.replace('mailto:', '').split('?')[0];
-
-  return '';
-}
-
-function getOutlookContent() {
-  const bodyEl = getOutlookBodyEl();
-  if (!bodyEl) return null;
-
-  const body    = bodyEl.innerText.trim();
-  const subject = getOutlookSubject();
-  const sender  = getOutlookSender();
-
-  if (!body || body.length < 10) return null;
-
-  return { subject, body: body.substring(0, 1500), sender, platform: 'outlook' };
-}
-
-// ── Unified check ─────────────────────────────────────────────────────────────
-
-function getCurrentEmailId() {
-  return PLATFORM === 'gmail' ? getGmailEmailId() : getOutlookEmailId();
-}
-
-function getCurrentEmailContent() {
-  return PLATFORM === 'gmail' ? getGmailContent() : getOutlookContent();
-}
+// ── Email-change detection ────────────────────────────────────────────────────
 
 function checkForEmailChange() {
-  const currentId = getCurrentEmailId();
-  console.log('[GmailGenie] check — platform:', PLATFORM, 'id:', currentId, 'last:', lastEmailId);
+  const currentId = getGmailEmailId();
+  console.log('[GmailGenie] check — id:', currentId, 'last:', lastEmailId);
 
   if (!currentId) {
     // Not in an email view — reset so the popup shows idle state
     if (lastEmailId !== null) {
       lastEmailId = null;
-      chrome.storage.local.set({ status: 'idle', event: null, error: null, emailData: null });
+      chrome.storage.local.set({ status: 'idle', events: null, error: null, emailData: null });
     }
     return;
   }
 
   if (currentId === lastEmailId) return; // Same email, nothing to do
 
-  const emailData = getCurrentEmailContent();
+  const emailData = getGmailContent();
   if (!emailData) return; // Content not loaded yet — observer will fire again
 
   lastEmailId = currentId;
@@ -229,10 +139,7 @@ function onNavigate() {
 // Gmail: hash-based routing
 window.addEventListener('hashchange', onNavigate);
 
-// Outlook: uses History API (pushState / replaceState)
-window.addEventListener('popstate', onNavigate);
-
-// Both: catch framework-driven URL changes and lazy-loaded content
+// Catch framework-driven URL changes and lazy-loaded content
 let lastHref = location.href;
 const observer = new MutationObserver(() => {
   if (location.href !== lastHref) {
@@ -280,8 +187,9 @@ function cardConfidencePercent(ev) {
   return ({ high: 92, medium: 66, low: 34 })[ev.confidence] ?? 66;
 }
 
-function showEventCard(ev) {
-  removeCard();
+// Build the inner HTML for a single event block within the floating card.
+// `i` indexes the event so buttons/status don't collide when several are shown.
+function eventBlockHTML(ev, i) {
   // The event can be created directly on Google Calendar as long as it has a
   // date; time/duration are optional (all-day event otherwise).
   const canCreate = !!ev.date;
@@ -289,6 +197,43 @@ function showEventCard(ev) {
 
   const pct   = cardConfidencePercent(ev);
   const level = pct >= 80 ? 'high' : pct >= 50 ? 'medium' : 'low';
+
+  return `
+    <div class="gg-event" data-idx="${i}">
+      <div class="gg-title">${esc(ev.title || 'Untitled Event')}</div>
+
+      <div class="gg-conf">
+        <div class="gg-conf-head">
+          <span class="gg-conf-label">Confidence</span>
+          <span class="gg-conf-pct">${pct}%</span>
+        </div>
+        <div class="gg-track"><div class="gg-fill ${level}" style="width:${pct}%"></div></div>
+      </div>
+
+      <div class="gg-editable" data-idx="${i}" title="Edit event">
+        <div class="gg-card">
+          ${dateStr    ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/></svg><span>${esc(dateStr)}</span></div>` : ''}
+          ${ev.location? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg><span>${esc(ev.location)}</span></div>` : ''}
+          ${!dateStr && !ev.location ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg><span>Event detected</span></div>` : ''}
+        </div>
+        <div class="gg-edit-overlay">
+          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          Edit
+        </div>
+      </div>
+      ${canCreate  ? `<button class="gg-btn" data-idx="${i}">&#10133; Add to Google Calendar</button>` : ''}
+      <div class="gg-status" data-idx="${i}"></div>
+    </div>
+  `;
+}
+
+function showEventCard(events) {
+  removeCard();
+  const list  = Array.isArray(events) ? events : [events];
+  const count = list.length;
+  const heading = count === 1
+    ? '&#128197; GmailGenie detected an event'
+    : `&#128197; GmailGenie detected ${count} events`;
 
   const card = document.createElement('div');
   card.id = CARD_ID;
@@ -397,55 +342,43 @@ function showEventCard(ev) {
       #gmailgenie-floating-card .gg-status:empty { margin-top: 0; }
       #gmailgenie-floating-card .gg-status.ok  { color: #0f9d58; }
       #gmailgenie-floating-card .gg-status.err { color: #d92d20; }
+      /* Stacked events: keep the card within the viewport and separate blocks. */
+      #gmailgenie-floating-card .gg-body { max-height: 70vh; overflow-y: auto; }
+      #gmailgenie-floating-card .gg-event + .gg-event {
+        margin-top: 16px; padding-top: 16px; border-top: 1px solid #eef0f4;
+      }
     </style>
     <div class="gg-head">
-      <span class="gg-head-title">&#128197; GmailGenie detected an event</span>
+      <span class="gg-head-title">${heading}</span>
       <button class="gg-x" id="gg-close">&#10005;</button>
     </div>
     <div class="gg-body">
-      <div class="gg-title">${esc(ev.title || 'Untitled Event')}</div>
-
-      <div class="gg-conf">
-        <div class="gg-conf-head">
-          <span class="gg-conf-label">Confidence</span>
-          <span class="gg-conf-pct">${pct}%</span>
-        </div>
-        <div class="gg-track"><div class="gg-fill ${level}" style="width:${pct}%"></div></div>
-      </div>
-
-      <div class="gg-editable" id="gg-edit-zone" title="Edit event">
-        <div class="gg-card">
-          ${dateStr    ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/></svg><span>${esc(dateStr)}</span></div>` : ''}
-          ${ev.location? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg><span>${esc(ev.location)}</span></div>` : ''}
-          ${!dateStr && !ev.location ? `<div class="gg-row"><svg class="gg-mi" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg><span>Event detected</span></div>` : ''}
-        </div>
-        <div class="gg-edit-overlay">
-          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-          Edit
-        </div>
-      </div>
-      ${canCreate  ? `<button class="gg-btn" id="gg-cal">&#10133; Add to Google Calendar</button>` : ''}
-      <div class="gg-status" id="gg-status"></div>
+      ${list.map((ev, i) => eventBlockHTML(ev, i)).join('')}
     </div>
   `;
   document.body.appendChild(card);
   document.getElementById('gg-close').addEventListener('click', removeCard);
-  // Hover the details section to reveal "Edit"; click to open the editor popup.
-  document.getElementById('gg-edit-zone')?.addEventListener('click', () => {
-    safeSendMessage({ type: 'OPEN_EDITOR' });
-    removeCard();
-  });
-  document.getElementById('gg-cal')?.addEventListener('click', () => {
-    createEventFromCard(ev);
+
+  // Wire each event block's edit zone and Add button by index.
+  list.forEach((ev, i) => {
+    // Hover the details section to reveal "Edit"; click to open the editor popup.
+    card.querySelector(`.gg-editable[data-idx="${i}"]`)?.addEventListener('click', () => {
+      safeSendMessage({ type: 'OPEN_EDITOR' });
+      removeCard();
+    });
+    card.querySelector(`.gg-btn[data-idx="${i}"]`)?.addEventListener('click', () => {
+      createEventFromCard(ev, i);
+    });
   });
 }
 
-// Create the event directly on Google Calendar (via background → backend).
-// No tab opens; the card's button reflects Creating → Added ✓ / error, then
-// the card auto-dismisses on success.
-function createEventFromCard(ev) {
-  const btn    = document.getElementById('gg-cal');
-  const status = document.getElementById('gg-status');
+// Create one event directly on Google Calendar (via background → backend).
+// No tab opens; that block's button reflects Creating → Added ✓ / error. The
+// card auto-dismisses only once every event block has succeeded.
+function createEventFromCard(ev, i) {
+  const card   = document.getElementById(CARD_ID);
+  const btn    = card?.querySelector(`.gg-btn[data-idx="${i}"]`);
+  const status = card?.querySelector(`.gg-status[data-idx="${i}"]`);
   if (!btn) return;
 
   const event = {
@@ -459,14 +392,16 @@ function createEventFromCard(ev) {
 
   btn.disabled = true;
   btn.textContent = 'Creating…';
-  if (status) { status.textContent = ''; status.className = 'gg-status'; }
+  if (status) { status.textContent = ''; status.className = 'gg-status'; status.setAttribute('data-idx', i); }
 
   safeSendMessage({ type: 'CREATE_EVENT', event }, (result) => {
     if (result && result.ok) {
       btn.textContent = '✓ Added to Calendar';
       btn.classList.add('gg-btn-success');
       if (status) { status.textContent = 'Event created on your Google Calendar.'; status.classList.add('ok'); }
-      setTimeout(removeCard, 2500);
+      // Auto-dismiss only when no block still has a pending Add button.
+      const pending = card.querySelectorAll('.gg-btn:not(.gg-btn-success)');
+      if (pending.length === 0) setTimeout(removeCard, 2500);
     } else {
       const msg = (result && result.error) || 'Could not create the event.';
       btn.disabled = false;
@@ -479,9 +414,9 @@ function createEventFromCard(ev) {
 // Watch storage — show or remove card based on current mode
 chrome.storage.onChanged.addListener((_, area) => {
   if (area !== 'local') return;
-  chrome.storage.local.get(['status', 'event', 'notificationMode'], (data) => {
-    if (data.status === 'done' && data.event?.event_found && data.notificationMode === 'card') {
-      showEventCard(data.event);
+  chrome.storage.local.get(['status', 'events', 'notificationMode'], (data) => {
+    if (data.status === 'done' && data.events?.length && data.notificationMode === 'card') {
+      showEventCard(data.events);
     } else if (data.status === 'idle') {
       removeCard();
     }
