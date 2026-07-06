@@ -27,3 +27,6 @@ env/
 .vscode/
 .idea/
 *.swp
+
+# Extension signing key (keep private, do not commit)
+extension-key.pem

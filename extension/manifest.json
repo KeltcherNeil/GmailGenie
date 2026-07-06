@@ -3,7 +3,12 @@
   "name": "GmailGenie",
   "version": "1.0.0",
   "description": "Detects scheduling info in your Gmail and adds it to Google Calendar in one click.",
-  "permissions": ["storage", "activeTab", "identity"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvIChO7y/MM2sKXa5n7IymPwGmRTOkrOoifbk4qljLKcHI9/s1m3+ciXPGBRkpN+p1GYt7yg8xRZTOalXWVem/LN9MqTFXzkChQBchsEWBKHAbDLJjgLoF5Rrj9fEoTLAkU/NK5craWn9e7WRsEZzfgX41/1YEguRfTKy8e3riWUaFUIFFGmqSTb911IlNTbrQpGl21VRU+sUyca9hhRQoM5bSSZZFanxdQsyYhZql0X0u9+mAcoWpzzjILqUPBZoV9uAedy7IxRRVHJ20q0zhjRWCPH9OLZ6GcxkSHj0xGDbztFFcDY2SCkh1wYxDmf0V4OxXdyi5zpA+dx+C0zARwIDAQAB",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "identity"
+  ],
   "host_permissions": [
     "https://mail.google.com/*",
     "https://gmailgenie-485353812643.us-central1.run.app/*",
@@ -22,8 +27,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://mail.google.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
