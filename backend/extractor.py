@@ -16,10 +16,8 @@ MODEL = 'claude-haiku-4-5-20251001'
 
 # The Anthropic client is created lazily (on first extraction) rather than at
 # import time. Creating it eagerly requires ANTHROPIC_API_KEY to be set, which
-# would crash the whole backend on startup — including the /create-event route,
-# which needs no Claude access at all (extraction runs client-side in the
-# extension). Lazy init lets the backend boot and create calendar events even
-# when no Anthropic key is configured.
+# would crash the whole backend on startup. Lazy init lets the backend boot
+# (e.g. serve /health) even when no Anthropic key is configured.
 _client = None
 
 

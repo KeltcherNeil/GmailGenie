@@ -25,7 +25,6 @@ gmailgenie/
 ├── backend/                    # Python Flask server
 │   ├── app.py                  # Main Flask app and API routes
 │   ├── extractor.py            # AI-powered event extraction logic
-│   ├── calendar_helper.py      # Google Calendar API helpers
 │   ├── email_cleaner.py        # Preprocessing/cleaning email text
 │   └── requirements.txt        # Python dependencies
 │
@@ -72,8 +71,8 @@ popup.html / popup.js
     → reads result from chrome.storage
     → shows suggested (editable) event to user
     → on "Add to Calendar", sends CREATE_EVENT to background.js
-    → background.js POSTs the event to the backend /create-event, which writes it
-      straight to Google Calendar via the API — no calendar tab opens, no manual Save
+    → background.js gets the user's Google OAuth token (chrome.identity) and writes
+      the event straight to the Google Calendar API — no backend, no tab, no manual Save
 
 Python Backend (app.py)
     → receives email text
@@ -130,10 +129,10 @@ Create a `.env` file in the `backend/` directory:
 
 ```
 ANTHROPIC_API_KEY=your_key_here
-GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret
 FLASK_ENV=development
 ```
+(Google OAuth is configured in the extension's `manifest.json`, not here — the backend does no
+Google auth.)
 
 ---
 
@@ -141,9 +140,10 @@ FLASK_ENV=development
 
 ### Running the backend server (shell)
 
-The backend must be running whenever you use the extension's **Add to Calendar**
-button — that button POSTs to `http://localhost:5001/create-event`. If it isn't
-running, the popup shows "Could not reach the GmailGenie backend."
+The backend now only serves `/extract-event` and `/health` (calendar creation runs
+client-side in the extension). Note: the extension currently calls the Anthropic API
+directly from `background.js`, so this local server isn't required for the current
+extension flow — it's kept for the `tests/` extraction/eval scripts and future use.
 
 **One-time setup — create the virtualenv and install dependencies:**
 ```bash
@@ -194,13 +194,11 @@ curl -s http://localhost:5001/health   # prints {"status":"ok"} when up
 | Method | Endpoint | Description |
 |---|---|---|
 | POST | `/extract-event` | Takes email text, returns extracted event JSON |
-| POST | `/create-event` | Takes an event JSON object, creates it on the user's primary Google Calendar via the API, returns `{ ok, id, htmlLink }` |
 | GET | `/health` | Health check — returns 200 if server is running |
 
-**Note on `/create-event` OAuth:** the first call runs `calendar_helper.get_calendar_service()`,
-which needs `backend/credentials.json` (a **Desktop** OAuth client downloaded from Google Cloud
-Console) and opens a browser once for consent, writing `backend/token.json`. Both files are
-gitignored. Subsequent calls reuse/refresh the token silently.
+**Note:** calendar creation is **not** a backend endpoint. It runs entirely in the Chrome
+extension via `chrome.identity` + the Google Calendar API (see the "New behaviour" section under
+Problems). The backend never touches Google Calendar.
 
 ---
 
@@ -261,8 +259,10 @@ tried to detect the save and close the tab. It was unreliable and has been delet
 
 **Requirement:** a Google OAuth **Chrome-Extension** client ID must be set in `manifest.json`'s
 `oauth2.client_id` (see "Google OAuth setup" below). Each user consents once in their own browser;
-Chrome caches and refreshes the token automatically. `backend/calendar_helper.py`,
-`credentials.json`, `token.json`, and the `/create-event` route are now **unused** and can be deleted.
+Chrome caches and refreshes the token automatically. The old server-side calendar code
+(`backend/calendar_helper.py`, `credentials.json`, `token.json`, the `/create-event` route, and
+the Google client libraries in `requirements.txt`) has been **removed** — the backend no longer
+touches Google Calendar.
 
 ---
 
