@@ -5,22 +5,15 @@ let currentState = {};
 const mainContent    = document.getElementById('main-content');
 const settingsPanel  = document.getElementById('settings-panel');
 const settingsBtn    = document.getElementById('settings-btn');
-const apiKeyInput    = document.getElementById('api-key-input');
 
 // ── Initialise ──────────────────────────────────────────────────────────────
 
 async function init() {
   const data = await chrome.storage.local.get([
-    'status', 'event', 'error', 'apiKey', 'emailData', 'notificationMode'
+    'status', 'event', 'error', 'emailData', 'notificationMode'
   ]);
   currentState = data;
   render(data);
-
-  // Mask the stored key in the settings input
-  if (data.apiKey) {
-    apiKeyInput.value = '••••••••••••••••••••••';
-    apiKeyInput.placeholder = 'Enter new key to replace';
-  }
 
   // Set the saved notification mode radio
   const savedMode = data.notificationMode || 'none';
@@ -45,12 +38,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Routing ─────────────────────────────────────────────────────────────────
 
 function render(data) {
-  const { status, event, error, apiKey } = data;
-
-  if (!apiKey || status === 'no_api_key') {
-    renderSetup();
-    return;
-  }
+  const { status, event, error } = data;
 
   switch (status) {
     case 'processing': renderProcessing(); break;
@@ -64,32 +52,6 @@ function render(data) {
 }
 
 // ── Views ────────────────────────────────────────────────────────────────────
-
-function renderSetup() {
-  mainContent.innerHTML = `
-    <div class="setup-view">
-      <p>Add your <strong>Anthropic API key</strong> to start detecting scheduling info in Gmail.</p>
-      <div class="form-group">
-        <label for="setup-key-input">Anthropic API Key</label>
-        <input type="password" id="setup-key-input" placeholder="sk-ant-..." autocomplete="off" />
-        <p class="hint">Stored locally in your browser. Never sent anywhere except api.anthropic.com.</p>
-      </div>
-      <button id="setup-save-btn" class="btn primary full-width">Save &amp; Start</button>
-    </div>
-  `;
-
-  document.getElementById('setup-save-btn').addEventListener('click', async () => {
-    const key = document.getElementById('setup-key-input').value.trim();
-    if (key) await saveApiKey(key);
-  });
-
-  document.getElementById('setup-key-input').addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      const key = e.target.value.trim();
-      if (key) await saveApiKey(key);
-    }
-  });
-}
 
 function renderProcessing() {
   mainContent.innerHTML = `
@@ -324,30 +286,6 @@ function setSettingsOpen(open) {
 settingsBtn.addEventListener('click', () => {
   setSettingsOpen(settingsPanel.classList.contains('hidden'));
 });
-
-// With no Save button, the API key is saved automatically: on Enter (which also
-// closes the panel) and on blur (when the user clicks away from the field).
-apiKeyInput.addEventListener('keydown', async (e) => {
-  if (e.key === 'Enter') {
-    const val = e.target.value.trim();
-    if (!val || val.startsWith('•')) return;
-    await saveApiKey(val);
-    setSettingsOpen(false);
-  }
-});
-
-apiKeyInput.addEventListener('blur', async () => {
-  const val = apiKeyInput.value.trim();
-  // Ignore empty input or the masked placeholder dots (unchanged key).
-  if (!val || val.startsWith('•')) return;
-  await saveApiKey(val);
-});
-
-async function saveApiKey(key) {
-  await chrome.storage.local.set({ apiKey: key });
-  apiKeyInput.value = '••••••••••••••••••••••';
-  await init();
-}
 
 // Save notification mode preference immediately on change
 document.querySelectorAll('input[name="notif-mode"]').forEach(radio => {

@@ -1,31 +1,16 @@
-// background.js — Service worker: calls Claude API and stores extracted event
+// background.js — Service worker: calls the hosted extraction backend and stores
+// the extracted event. Calendar creation is client-side (chrome.identity); Claude
+// extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (client-side calendar build)');
+console.log('[GmailGenie] background service worker loaded (hosted-extraction build)');
 
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-
-// claude-haiku is fast and cheap — ideal for extraction
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-
-const SYSTEM_PROMPT = `You extract scheduling information from emails.
-Return ONLY valid JSON — no markdown, no explanation, nothing else.
-
-If an event or meeting is found:
-{
-  "event_found": true,
-  "title": "short event title",
-  "date": "YYYY-MM-DD or null",
-  "time": "HH:MM in 24h format or null",
-  "duration_minutes": integer or null,
-  "location": "location string or null",
-  "description": "one-sentence description or null",
-  "confidence": "high" | "medium" | "low",
-  "confidence_score": integer 0-100 (how sure you are this is a real, actionable event)
-}
-
-If no scheduling information is found:
-{ "event_found": false }`;
+// Hosted extraction service. The backend holds the Anthropic key and returns the
+// extracted event JSON — the extension sends only the email text.
+//   • Local dev:  http://localhost:5001
+//   • Production: your Cloud Run URL, e.g. https://gmailgenie-xxxxxxxx-uc.a.run.app
+// Keep this in sync with the host_permissions entry in manifest.json.
+const BACKEND_URL = 'http://localhost:5001';
 
 // Track the latest processing job to ignore stale results when emails change quickly
 let currentJobId = null;
@@ -36,53 +21,35 @@ let currentJobId = null;
 const CALENDAR_API_URL =
   'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all';
 
-// Returns e.g. "Wednesday, June 25, 2026" so Claude can resolve relative dates
-function todayString() {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  });
-}
-
-async function extractEvent(emailData, apiKey) {
-  const emailText = [
-    `Subject: ${emailData.subject}`,
-    emailData.sender ? `From: ${emailData.sender}` : '',
-    '',
-    emailData.body
-  ].filter(Boolean).join('\n');
-
-  const res = await fetch(CLAUDE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      // Required when calling the API directly from a browser/extension context
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 256,
-      system: SYSTEM_PROMPT,
-      messages: [
-        { role: 'user', content: `Today's date: ${todayString()}\n\nEMAIL:\n${emailText}` }
-      ]
-    })
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body.substring(0, 200)}`);
+// POST the email text to the hosted backend, which cleans it, calls Claude with
+// the operator's key, and returns the structured event JSON.
+async function extractEvent(emailData) {
+  let res;
+  try {
+    res = await fetch(`${BACKEND_URL}/extract-event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: emailData.subject || '',
+        sender:  emailData.sender || '',
+        body:    emailData.body || '',
+      }),
+    });
+  } catch (err) {
+    // Network failure — backend unreachable (down, wrong URL, offline).
+    throw new Error('Could not reach the GmailGenie service. Please try again later.');
   }
 
-  const data = await res.json();
-  const text = data.content?.[0]?.text?.trim() ?? '';
+  const data = await res.json().catch(() => ({}));
 
-  // Strip any accidental markdown fences
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Claude returned no JSON');
+  if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error('Rate limit reached — please wait a moment and try again.');
+    }
+    throw new Error(data.error || `Extraction failed (${res.status})`);
+  }
 
-  return JSON.parse(jsonMatch[0]);
+  return data;
 }
 
 async function handleEmailOpened(emailData) {
@@ -98,16 +65,7 @@ async function handleEmailOpened(emailData) {
   });
 
   try {
-    const { apiKey } = await chrome.storage.local.get('apiKey');
-
-    if (!apiKey) {
-      if (currentJobId === jobId) {
-        await chrome.storage.local.set({ status: 'no_api_key' });
-      }
-      return;
-    }
-
-    const event = await extractEvent(emailData, apiKey);
+    const event = await extractEvent(emailData);
 
     if (currentJobId === jobId) {
       await chrome.storage.local.set({ status: 'done', event, error: null });

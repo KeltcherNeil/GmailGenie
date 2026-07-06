@@ -9,7 +9,8 @@
     "https://outlook.live.com/*",
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
-    "https://api.anthropic.com/*",
+    "http://localhost:5001/*",
+    "https://*.run.app/*",
     "https://www.googleapis.com/*"
   ],
   "oauth2": {

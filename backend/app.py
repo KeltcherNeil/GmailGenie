@@ -7,11 +7,22 @@ All route definitions live here. Business logic lives in helper modules:
 
 Note: calendar creation is handled entirely client-side in the Chrome extension
 (chrome.identity + the Google Calendar API). This backend no longer writes events.
+
+Deployment: this service is meant to run hosted (Google Cloud Run) so end users
+never paste an Anthropic key or run a shell. ANTHROPIC_API_KEY lives in the host's
+environment and never ships in the extension. See DEPLOY.md.
+
+Abuse protection (Phase 1): because /extract-event spends the operator's Anthropic
+credits on every call, it is guarded by (1) an Origin allowlist and (2) per-IP rate
+limiting. A brand-new open endpoint would otherwise let anyone drain the key. Phase 2
+replaces this with per-user Google-identity verification.
 """
 
 import os
 
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 
 from email_cleaner import clean_email
@@ -21,16 +32,50 @@ load_dotenv()
 
 app = Flask(__name__)
 
+# ── Config ─────────────────────────────────────────────────────────────────────
+# ALLOWED_ORIGINS: comma-separated list of origins permitted to call /extract-event,
+# e.g. "chrome-extension://mhcloobbehmmanfjdcejglmndcogejjp". Chrome sends the
+# extension's origin on service-worker fetches. If unset (local dev), the origin
+# check is disabled and any origin is allowed — DO NOT deploy without setting it.
+ALLOWED_ORIGINS = {
+    o.strip() for o in os.getenv('ALLOWED_ORIGINS', '').split(',') if o.strip()
+}
 
-# ── CORS ─────────────────────────────────────────────────────────────────────
-# The Chrome extension calls this backend from a background service worker.
-# With the matching host permission that request usually bypasses CORS, but we
-# answer preflight/OPTIONS and echo the headers so it works regardless of how
-# Chrome classifies the request.
+# RATE_LIMITS: per-IP limits applied to /extract-event. Override via env if needed.
+RATE_LIMITS = os.getenv('RATE_LIMITS', '30 per minute;300 per day')
+
+
+def _origin_allowed(origin: str) -> bool:
+    """True when the origin check is disabled (dev) or the origin is allowlisted."""
+    return not ALLOWED_ORIGINS or origin in ALLOWED_ORIGINS
+
+
+# ── Rate limiting ────────────────────────────────────────────────────────────
+# In-memory storage: fine for a single Cloud Run instance. Cloud Run can scale to
+# several instances, each with its own counter, so the effective limit is
+# (limit × instances) — acceptable as a floor for Phase 1. Phase 2's per-user auth
+# is the real quota. For strict global limits, point storage_uri at Redis/Memorystore.
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[],  # only /extract-event is limited, via the decorator below
+)
+
+
+# ── CORS + origin allowlist ────────────────────────────────────────────────────
+# The Chrome extension calls this backend from a background service worker. We echo
+# CORS headers so the request works regardless of how Chrome classifies it, but we
+# reflect ONLY an allowlisted origin (never a blanket "*") once ALLOWED_ORIGINS is set.
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
+    origin = request.headers.get('Origin', '')
+    if not ALLOWED_ORIGINS:
+        # Dev mode — no allowlist configured.
+        response.headers['Access-Control-Allow-Origin'] = origin or '*'
+    elif origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response
@@ -39,14 +84,19 @@ def add_cors_headers(response):
 # ── Health check ─────────────────────────────────────────────────────────────
 
 @app.route('/health', methods=['GET'])
+@limiter.exempt
 def health():
-    """Simple liveness probe. Returns 200 when the server is running."""
+    """Simple liveness probe. Returns 200 when the server is running.
+
+    Open and unlimited — Cloud Run and uptime monitors hit this.
+    """
     return jsonify({'status': 'ok'}), 200
 
 
 # ── Event extraction ─────────────────────────────────────────────────────────
 
-@app.route('/extract-event', methods=['POST'])
+@app.route('/extract-event', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS)
 def extract_event_route():
     """
     Extract scheduling information from a raw email.
@@ -62,6 +112,16 @@ def extract_event_route():
         On success — the event object from extractor.py (event_found: true/false)
         On error   — { "error": "description" }
     """
+    if request.method == 'OPTIONS':
+        # CORS preflight — headers are added by add_cors_headers.
+        return ('', 204)
+
+    # Origin allowlist (skipped in dev when ALLOWED_ORIGINS is unset).
+    origin = request.headers.get('Origin', '')
+    if not _origin_allowed(origin):
+        app.logger.warning('Rejected request from disallowed origin: %r', origin)
+        return jsonify({'error': 'Origin not allowed'}), 403
+
     data = request.get_json(silent=True)
 
     if not data:
@@ -95,9 +155,11 @@ def extract_event_route():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    # Default to 5001, not 5000: on macOS the AirPlay Receiver service squats on
-    # port 5000 and answers every request with 403 Forbidden, so the extension
-    # would never reach Flask. Override with the PORT env var if needed.
+    # Local dev only. In production, gunicorn imports `app:app` directly and this
+    # block is not executed (see Dockerfile).
+    #
+    # Port: Cloud Run injects PORT (default 8080). Locally we default to 5001, not
+    # 5000 — macOS AirPlay Receiver squats on 5000 and 403s every request.
     port  = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_ENV') == 'development'
     app.run(host='0.0.0.0', port=port, debug=debug)

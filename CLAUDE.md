@@ -140,10 +140,18 @@ Google auth.)
 
 ### Running the backend server (shell)
 
-The backend now only serves `/extract-event` and `/health` (calendar creation runs
-client-side in the extension). Note: the extension currently calls the Anthropic API
-directly from `background.js`, so this local server isn't required for the current
-extension flow — it's kept for the `tests/` extraction/eval scripts and future use.
+The backend serves `/extract-event` and `/health`. It holds the Anthropic key
+server-side and does the Claude extraction; the extension (`background.js`) POSTs
+email text to it and never sees the key. Calendar creation stays client-side in the
+extension (`chrome.identity`). For production this backend is **deployed to Google
+Cloud Run** — see `backend/DEPLOY.md`. Run it locally (below) for development; point
+`BACKEND_URL` in `background.js` at `http://localhost:5001`.
+
+For local dev the origin check is disabled unless you set `ALLOWED_ORIGINS`; to mirror
+production, start it with:
+```bash
+ALLOWED_ORIGINS="chrome-extension://<your-extension-id>" ../.venv/bin/python app.py
+```
 
 **One-time setup — create the virtualenv and install dependencies:**
 ```bash
@@ -286,7 +294,7 @@ touches Google Calendar.
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
 - Calendar creation is **fully client-side** (`chrome.identity` + direct Calendar API) — no server needed. OAuth tokens are cached and refreshed by Chrome automatically.
-- Extraction currently calls the Anthropic API **directly** from `background.js` using the user's own key (stored in `chrome.storage.local`) — there is no hosted extraction backend yet.
+- Extraction runs **server-side**: `background.js` POSTs email text to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by an `ALLOWED_ORIGINS` allowlist + per-IP rate limiting (Phase 1); per-user Google-identity auth is the planned Phase 2. Deploy: `backend/DEPLOY.md`.
 - Emails with multiple scheduling requests in one thread may only extract the most recent one
 - Timezone: events are created in the user's browser timezone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The email's own stated timezone, if different, is not yet parsed.
 
