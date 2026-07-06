@@ -3,15 +3,19 @@
   "name": "GmailGenie",
   "version": "0.2.0",
   "description": "Detects scheduling info in Gmail and Outlook emails and suggests Google Calendar events.",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "identity"],
   "host_permissions": [
     "https://mail.google.com/*",
     "https://outlook.live.com/*",
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
     "https://api.anthropic.com/*",
-    "http://localhost:5001/*"
+    "https://www.googleapis.com/*"
   ],
+  "oauth2": {
+    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/calendar.events"]
+  },
   "background": {
     "service_worker": "background.js"
   },

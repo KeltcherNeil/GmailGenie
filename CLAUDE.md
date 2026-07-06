@@ -241,34 +241,54 @@ opened it in a new tab, and the user clicked **Save** there. A fragile auto-retu
 `chrome.webNavigation` listeners, an injected save-button watcher, and a `beforeunload` suppressor)
 tried to detect the save and close the tab. It was unreliable and has been deleted.
 
-**New behaviour (current):**
+**New behaviour (current) — fully client-side, no backend:**
 1. User clicks **Add to Calendar** (popup) or **Add to Google Calendar** (floating card).
 2. The extension sends a `CREATE_EVENT` message to `background.js`.
-3. `background.js` → `createCalendarEvent()` POSTs the event to the backend `POST /create-event`.
-4. The backend uses `calendar_helper.get_calendar_service()` + `create_event()` to insert the
-   event on the user's primary Google Calendar via the API.
-5. The button shows **Creating… → Added to Calendar ✓** (or an error). No tab ever opens.
+3. `background.js` → `createCalendarEvent()` gets the user's own Google OAuth token via
+   `chrome.identity.getAuthToken()` and `POST`s the event straight to the Google Calendar API
+   (`https://www.googleapis.com/calendar/v3/calendars/primary/events`).
+4. The button shows **Creating… → Added to Calendar ✓** (or an error). No tab ever opens, and
+   **no local server is involved** — the token and the API call live entirely in the extension.
 
 **Where this logic lives now:**
 - `extension/popup.js` → `createEvent()` — sends `CREATE_EVENT`, renders the button states.
 - `extension/content.js` → `createEventFromCard()` — same for the floating card.
-- `extension/background.js` → `CREATE_EVENT` handler + `createCalendarEvent()` — POSTs to the backend.
-- `backend/app.py` → `POST /create-event` — validates and calls `calendar_helper.create_event()`.
-- `backend/calendar_helper.py` → `get_calendar_service()` / `create_event()` — Google Calendar API.
+- `extension/background.js` → `CREATE_EVENT` handler + `createCalendarEvent()` — gets the OAuth
+  token via `chrome.identity` and calls the Google Calendar API directly. `buildEventBody()` ports
+  the old `calendar_helper.build_event_body()` to JS (with real timezone via `Intl`).
+- `extension/manifest.json` → `oauth2` block (client ID + `calendar.events` scope) and the
+  `identity` permission.
 
-**Requirement:** the backend needs `backend/credentials.json` (a Desktop OAuth client) and does a
-one-time browser consent on first create (writes `backend/token.json`). Both files are gitignored.
+**Requirement:** a Google OAuth **Chrome-Extension** client ID must be set in `manifest.json`'s
+`oauth2.client_id` (see "Google OAuth setup" below). Each user consents once in their own browser;
+Chrome caches and refreshes the token automatically. `backend/calendar_helper.py`,
+`credentials.json`, `token.json`, and the `/create-event` route are now **unused** and can be deleted.
+
+---
+
+### Google OAuth setup (one-time, developer)
+
+`chrome.identity.getAuthToken` needs an OAuth client that matches this extension's ID:
+
+1. **Get the extension ID:** load `extension/` unpacked at `chrome://extensions` and copy the ID.
+   (To keep the ID stable across machines/reloads, pin it by adding a `"key"` to `manifest.json`.)
+2. **Google Cloud Console** → APIs & Services → **Enable** the *Google Calendar API*.
+3. **Credentials → Create Credentials → OAuth client ID → Application type: "Chrome Extension"**,
+   paste the extension ID.
+4. Copy the generated client ID (`…apps.googleusercontent.com`) into `manifest.json` →
+   `oauth2.client_id`, replacing the `YOUR_GOOGLE_OAUTH_CLIENT_ID…` placeholder.
+5. Add yourself as a **test user** on the OAuth consent screen (or publish it) so consent succeeds.
+6. Reload the extension. First "Add to Calendar" opens the Google account/consent picker once.
 
 ---
 
 ## Known Limitations & Gotchas
 
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
-- The Flask backend must be running locally for the extension to work — there is no hosted backend yet
-- OAuth tokens expire — the backend refreshes them automatically (`calendar_helper.get_calendar_service` uses the stored `backend/token.json` refresh token)
-- The backend must be running for **event creation** too, not just extraction — `POST /create-event` is what writes to Google Calendar
+- Calendar creation is **fully client-side** (`chrome.identity` + direct Calendar API) — no server needed. OAuth tokens are cached and refreshed by Chrome automatically.
+- Extraction currently calls the Anthropic API **directly** from `background.js` using the user's own key (stored in `chrome.storage.local`) — there is no hosted extraction backend yet.
 - Emails with multiple scheduling requests in one thread may only extract the most recent one
-- Timezone handling is not yet implemented — all times are treated as local time
+- Timezone: events are created in the user's browser timezone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The email's own stated timezone, if different, is not yet parsed.
 
 ---
 
