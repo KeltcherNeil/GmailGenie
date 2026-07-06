@@ -60,6 +60,3 @@ Passwords, other Gmail messages, contacts, browsing history, or payment informat
 We may update this policy; the "Effective date" above will change accordingly.
 Material changes will be reflected in the extension's store listing.
 
-## Contact
-
-Questions or requests: **keltcher.n@northeastern.edu**
