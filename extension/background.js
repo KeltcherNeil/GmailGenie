@@ -59,7 +59,22 @@ async function extractEvent(emailData) {
     throw new Error(data.error || `Extraction failed (${res.status})`);
   }
 
-  return data;
+  return normalizeEvents(data);
+}
+
+// The backend returns { events: [ {…}, … ] }. Older builds returned a single
+// { event_found, title, … } object. Coerce either into a plain array of event
+// objects so the rest of the extension only deals with one shape.
+function normalizeEvents(data) {
+  if (Array.isArray(data?.events)) {
+    return data.events.filter((e) => e && typeof e === 'object');
+  }
+  // Legacy single-event shape.
+  if (data && data.event_found) {
+    const { event_found, ...event } = data;
+    return [event];
+  }
+  return [];
 }
 
 async function handleEmailOpened(emailData) {
@@ -70,21 +85,21 @@ async function handleEmailOpened(emailData) {
   await chrome.storage.local.set({
     status: 'processing',
     emailData,
-    event: null,
+    events: null,
     error: null
   });
 
   try {
-    const event = await extractEvent(emailData);
+    const events = await extractEvent(emailData);
 
     if (currentJobId === jobId) {
-      await chrome.storage.local.set({ status: 'done', event, error: null });
+      await chrome.storage.local.set({ status: 'done', events, error: null });
 
-      // Badge mode — put a green dot on the icon to signal an event was found
-      if (event.event_found) {
+      // Badge mode — put a green dot on the icon to signal event(s) were found
+      if (events.length) {
         const { notificationMode = 'none' } = await chrome.storage.local.get('notificationMode');
         if (notificationMode === 'badge') {
-          chrome.action.setBadgeText({ text: '!' });
+          chrome.action.setBadgeText({ text: events.length > 1 ? String(events.length) : '!' });
           chrome.action.setBadgeBackgroundColor({ color: '#188038' });
         }
       }
@@ -94,7 +109,7 @@ async function handleEmailOpened(emailData) {
       await chrome.storage.local.set({
         status: 'error',
         error: err.message,
-        event: null
+        events: null
       });
     }
   }

@@ -48,7 +48,7 @@ gmailgenie/
 | Extension styling | Plain CSS |
 | Backend language | Python 3.11+ |
 | Backend framework | Flask |
-| AI model | Claude API (claude-sonnet-4-6) |
+| AI model | Claude API (see `MODEL` in `backend/extractor.py`) |
 | Calendar integration | Google Calendar API v3 |
 | Auth | Google OAuth 2.0 |
 
@@ -90,22 +90,35 @@ Python Backend (app.py)
 - All routes live in `app.py`, logic lives in separate helper modules
 - AI extraction logic belongs in `extractor.py`, not in `app.py`
 - Always clean email text before sending to the AI (remove quoted replies, signatures)
-- The AI should always return JSON — if no event is found, return `{"event_found": false}`
+- The AI always returns JSON. A single email can contain **zero, one, or several**
+  events, so the response is always an `events` array — an empty array means none.
 - Never hardcode API keys — always use environment variables via `python-dotenv`
-- All responses from the backend should follow this structure:
+- All responses from the backend follow this structure:
 
 ```json
 {
-  "event_found": true,
-  "title": "Project sync",
-  "date": "2024-03-15",
-  "time": "14:00",
-  "duration_minutes": 60,
-  "attendees": ["alice@example.com"],
-  "location": "Zoom",
-  "confidence": "high"
+  "events": [
+    {
+      "title": "Project sync",
+      "date": "2024-03-15",
+      "time": "14:00",
+      "duration_minutes": 60,
+      "attendees": ["alice@example.com"],
+      "location": "Zoom",
+      "description": "one-sentence summary or null",
+      "confidence": "high"
+    }
+  ]
 }
 ```
+
+- `extractor._normalize()` coerces older single-event shapes (`{"event_found": …}`)
+  into the `events` array, and `background.js`'s `normalizeEvents()` does the same on
+  the client — so a stale backend/extension during a deploy still works.
+- Extraction must scan the **whole** email and ignore narrative/past content (recaps,
+  sports scores, results). Because scheduling info often sits at the very end of a long
+  message, the body-length caps (`content.js` ~8000, `email_cleaner` ~6000) are kept
+  generous so trailing events are not truncated away before the AI sees them.
 
 ### JavaScript Extension
 
@@ -295,7 +308,8 @@ touches Google Calendar.
 - Gmail's DOM class names are obfuscated and may change — if content.js stops working, inspect Gmail's HTML to find the new email body selector
 - Calendar creation is **fully client-side** (`chrome.identity` + direct Calendar API) — no server needed. OAuth tokens are cached and refreshed by Chrome automatically.
 - Extraction runs **server-side**: `background.js` POSTs email text to the hosted backend (`/extract-event`), which calls Claude with the operator's key. Users never paste a key. The endpoint is guarded by an `ALLOWED_ORIGINS` allowlist + per-IP rate limiting (Phase 1); per-user Google-identity auth is the planned Phase 2. Deploy: `backend/DEPLOY.md`.
-- Emails with multiple scheduling requests in one thread may only extract the most recent one
+- Emails with several scheduling requests now return **all** of them (`events` array);
+  the popup shows a stacked list and the floating card lists each with its own button
 - Timezone: events are created in the user's browser timezone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The email's own stated timezone, if different, is not yet parsed.
 
 ---
@@ -303,7 +317,7 @@ touches Google Calendar.
 ## Future Improvements (not yet built)
 
 - Availability detection: read existing calendar events and suggest free slots when someone asks "when are you free?"
-- Multi-event extraction: handle emails containing more than one proposed meeting time
+- ~~Multi-event extraction: handle emails containing more than one proposed meeting time~~ ✅ done
 - Confidence scoring: only show the popup when extraction confidence is above a threshold
 - Hosted backend: deploy Flask app to Railway or Render so others can install the extension
 

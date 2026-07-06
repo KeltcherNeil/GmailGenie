@@ -147,6 +147,28 @@ main {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Multiple events (stacked list) ──────────── */
+.events-header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink-soft);
+  margin-bottom: 12px;
+}
+
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Divider between stacked event cards (not before the first). */
+.event-block + .event-block {
+  padding-top: 18px;
+  border-top: 1px solid var(--line, #eef0f4);
+}
+
 .event-title {
   font-size: 16px;
   font-weight: 600;

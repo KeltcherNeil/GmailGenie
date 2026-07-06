@@ -75,9 +75,16 @@ class TestEmailCleaner(unittest.TestCase):
         self.assertNotIn("\n\n\n", result)
 
     def test_respects_max_length(self):
-        email = "x" * 5000
+        email = "x" * 9000
         result = clean_email(email)
-        self.assertLessEqual(len(result), 3000)
+        self.assertLessEqual(len(result), 6000)
+
+    def test_keeps_trailing_scheduling_info(self):
+        # Scheduling details often sit at the very end of a long email. The cap
+        # must be generous enough not to truncate them away.
+        email = ("recap line\n" * 300) + "Let's meet Tuesday at 6:30pm."
+        result = clean_email(email)
+        self.assertIn("6:30pm", result)
 
 
 # ── extractor tests ───────────────────────────────────────────────────────────
@@ -89,12 +96,29 @@ def _mock_response(payload: dict) -> MagicMock:
     return msg
 
 
+def _patch_claude(payload_or_text):
+    """
+    Patch extractor._get_client so the Anthropic call returns a canned reply.
+
+    Pass a dict to have it JSON-encoded, or a raw string to simulate arbitrary
+    (e.g. non-JSON) model output. Returns the patcher's mock client so tests can
+    assert on how messages.create was called.
+    """
+    mock_client = MagicMock()
+    if isinstance(payload_or_text, str):
+        resp = MagicMock()
+        resp.content = [MagicMock(text=payload_or_text)]
+    else:
+        resp = _mock_response(payload_or_text)
+    mock_client.messages.create.return_value = resp
+    return mock_client
+
+
 class TestExtractor(unittest.TestCase):
 
-    @patch('extractor.client')
-    def test_event_found_full_details(self, mock_client):
-        mock_client.messages.create.return_value = _mock_response({
-            'event_found': True,
+    @patch('extractor._get_client')
+    def test_single_event_full_details(self, mock_get_client):
+        mock_get_client.return_value = _patch_claude({'events': [{
             'title': 'Team sync',
             'date': '2024-03-15',
             'time': '14:00',
@@ -103,57 +127,92 @@ class TestExtractor(unittest.TestCase):
             'location': 'Zoom',
             'description': 'Weekly team sync',
             'confidence': 'high',
-        })
+        }]})
 
         result = extractor.extract_event(
             subject='Team sync Friday',
             body="Let's meet Friday March 15 at 2pm on Zoom. Alice will join too."
         )
 
-        self.assertTrue(result['event_found'])
-        self.assertEqual(result['title'], 'Team sync')
-        self.assertEqual(result['time'], '14:00')
-        self.assertEqual(result['location'], 'Zoom')
-        self.assertIn('alice@example.com', result['attendees'])
+        self.assertEqual(len(result['events']), 1)
+        event = result['events'][0]
+        self.assertEqual(event['title'], 'Team sync')
+        self.assertEqual(event['time'], '14:00')
+        self.assertEqual(event['location'], 'Zoom')
+        self.assertIn('alice@example.com', event['attendees'])
 
-    @patch('extractor.client')
-    def test_no_event_returns_false(self, mock_client):
-        mock_client.messages.create.return_value = _mock_response({'event_found': False})
+    @patch('extractor._get_client')
+    def test_multiple_events(self, mock_get_client):
+        """An email with two scheduled events returns both, in order."""
+        mock_get_client.return_value = _patch_claude({'events': [
+            {'title': 'vs Winchester', 'date': '2026-07-07', 'time': '18:30',
+             'location': 'Home', 'confidence': 'high'},
+            {'title': 'vs Waltham', 'date': '2026-07-14', 'time': '20:00',
+             'location': 'Home', 'confidence': 'high'},
+        ]})
+
+        result = extractor.extract_event(
+            subject='Season recap',
+            body='This Tuesday vs Winchester at 6:30. Next Tuesday July 14 vs Waltham at 8.'
+        )
+
+        self.assertEqual(len(result['events']), 2)
+        self.assertEqual(result['events'][0]['title'], 'vs Winchester')
+        self.assertEqual(result['events'][1]['time'], '20:00')
+
+    @patch('extractor._get_client')
+    def test_no_event_returns_empty_list(self, mock_get_client):
+        mock_get_client.return_value = _patch_claude({'events': []})
 
         result = extractor.extract_event(
             subject='Newsletter',
             body='Here are this week\'s top articles about machine learning...'
         )
 
-        self.assertFalse(result['event_found'])
+        self.assertEqual(result['events'], [])
 
-    @patch('extractor.client')
-    def test_raises_on_no_json(self, mock_client):
-        bad = MagicMock()
-        bad.content = [MagicMock(text='Sorry, I cannot help with that.')]
-        mock_client.messages.create.return_value = bad
+    @patch('extractor._get_client')
+    def test_normalizes_legacy_single_event_shape(self, mock_get_client):
+        """A model that still emits the old {event_found:true,...} shape is coerced."""
+        mock_get_client.return_value = _patch_claude({
+            'event_found': True, 'title': 'Lunch', 'date': '2024-06-01',
+            'time': '12:00', 'confidence': 'high',
+        })
+
+        result = extractor.extract_event(subject='Lunch', body='Lunch at noon.')
+        self.assertEqual(len(result['events']), 1)
+        self.assertEqual(result['events'][0]['title'], 'Lunch')
+        self.assertNotIn('event_found', result['events'][0])
+
+    @patch('extractor._get_client')
+    def test_normalizes_legacy_no_event_shape(self, mock_get_client):
+        mock_get_client.return_value = _patch_claude({'event_found': False})
+        result = extractor.extract_event(subject='x', body='no events here')
+        self.assertEqual(result['events'], [])
+
+    @patch('extractor._get_client')
+    def test_raises_on_no_json(self, mock_get_client):
+        mock_get_client.return_value = _patch_claude('Sorry, I cannot help with that.')
 
         with self.assertRaises(ValueError):
             extractor.extract_event(subject='Test', body='Some email body.')
 
-    @patch('extractor.client')
-    def test_strips_markdown_fences(self, mock_client):
+    @patch('extractor._get_client')
+    def test_strips_markdown_fences(self, mock_get_client):
         """Claude sometimes wraps JSON in ```json ... ``` — we should handle it."""
-        payload = {'event_found': True, 'title': 'Lunch', 'date': '2024-06-01',
+        payload = {'events': [{'title': 'Lunch', 'date': '2024-06-01',
                    'time': '12:00', 'duration_minutes': 60, 'attendees': [],
-                   'location': None, 'description': None, 'confidence': 'high'}
-        fenced = f"```json\n{json.dumps(payload)}\n```"
-        resp = MagicMock()
-        resp.content = [MagicMock(text=fenced)]
-        mock_client.messages.create.return_value = resp
+                   'location': None, 'description': None, 'confidence': 'high'}]}
+        mock_get_client.return_value = _patch_claude(f"```json\n{json.dumps(payload)}\n```")
 
         result = extractor.extract_event(subject='Lunch', body='Lunch at noon.')
-        self.assertTrue(result['event_found'])
-        self.assertEqual(result['title'], 'Lunch')
+        self.assertEqual(len(result['events']), 1)
+        self.assertEqual(result['events'][0]['title'], 'Lunch')
 
-    @patch('extractor.client')
-    def test_sender_included_in_prompt(self, mock_client):
-        mock_client.messages.create.return_value = _mock_response({'event_found': False})
+    @patch('extractor._get_client')
+    def test_sender_included_in_prompt(self, mock_get_client):
+        mock_client = _patch_claude({'events': []})
+        mock_get_client.return_value = mock_client
 
         extractor.extract_event(
             subject='Quick call?',

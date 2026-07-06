@@ -31,40 +31,82 @@ def _get_client() -> Anthropic:
 SYSTEM_PROMPT = """\
 You extract scheduling information from email text.
 
-Return ONLY valid JSON — no markdown fences, no explanation, nothing else.
+An email may describe ZERO, ONE, or SEVERAL distinct events (e.g. "we meet
+Tuesday at 6:30, then again next Tuesday at 8"). Read the WHOLE email and return
+every distinct future event you find — not just the first one.
 
-If a meeting, appointment, call, or event is found, return:
+Return ONLY valid JSON — no markdown fences, no explanation, nothing else.
+The top-level value is always an object with an "events" array:
 {
-  "event_found": true,
-  "title": "concise event title",
-  "date": "YYYY-MM-DD or null",
-  "time": "HH:MM in 24-hour format or null",
-  "duration_minutes": integer or null,
-  "attendees": ["email@example.com", ...] or [],
-  "location": "location string or null",
-  "description": "one-sentence summary or null",
-  "confidence": "high" | "medium" | "low"
+  "events": [
+    {
+      "title": "concise event title",
+      "date": "YYYY-MM-DD or null",
+      "time": "HH:MM in 24-hour format or null",
+      "duration_minutes": integer or null,
+      "attendees": ["email@example.com", ...] or [],
+      "location": "location string or null",
+      "description": "one-sentence summary or null",
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
 }
 
-If no scheduling information is found, return:
-{"event_found": false}
+If no event is found, return {"events": []}.
 
 Rules:
+- Return ONE array element per distinct event. Two different dates/times, or two
+  separately-scheduled meetings, are two events — do NOT merge them.
+- Ignore purely narrative or past content that carries no future scheduling:
+  recaps, sports scores, results, and "here's how it went" storytelling are NOT
+  events. Scores like "5-0", "7-5", "6:30" inside a recap are NOT times. Only
+  extract something the reader could actually put on a calendar.
 - confidence=high   → you can determine BOTH a specific calendar date and a time
 - confidence=medium → only one of date/time can be determined
 - confidence=low    → only a vague reference ("sometime next week", "soon")
 - Convert 12-hour times to 24-hour (e.g. 2:30 PM → 14:30)
 - Resolve relative dates to an actual YYYY-MM-DD using the provided today's date.
   "tomorrow", "this Thursday", "next Monday", "in two weeks", a bare day name like
-  "Thursday" → the concrete date, choosing the nearest FUTURE occurrence.
+  "Thursday" → the concrete date, choosing the nearest FUTURE occurrence. When the
+  email also states an explicit calendar date (e.g. "next Tuesday, July 14"),
+  prefer the explicit date.
   Only set date=null when no date can be inferred at all (e.g. "sometime soon").
 - Extract attendee email addresses only — ignore names without addresses\
 """
 
 
+def _normalize(parsed: dict) -> dict:
+    """
+    Coerce whatever the model returned into the canonical {"events": [...]} shape.
+
+    Accepts:
+      - the current shape: {"events": [ {...}, ... ]}
+      - a legacy single-event object: {"event_found": true, "title": ...}
+      - a legacy "no event" object:   {"event_found": false}
+      - a bare event object with no wrapper
+    so a prompt hiccup can't drop otherwise-valid events on the floor.
+    """
+    events = parsed.get('events')
+    if isinstance(events, list):
+        return {'events': [e for e in events if isinstance(e, dict)]}
+
+    # Legacy single-event shapes.
+    if parsed.get('event_found') is False:
+        return {'events': []}
+    if parsed.get('event_found') is True:
+        event = {k: v for k, v in parsed.items() if k != 'event_found'}
+        return {'events': [event]}
+
+    # A bare event object (has a title/date/time but no wrapper) → wrap it.
+    if any(k in parsed for k in ('title', 'date', 'time')):
+        return {'events': [parsed]}
+
+    return {'events': []}
+
+
 def extract_event(subject: str, body: str, sender: str = '', today: str = '') -> dict:
     """
-    Send cleaned email text to Claude and return the extracted event as a dict.
+    Send cleaned email text to Claude and return the extracted events as a dict.
 
     Args:
         subject: Email subject line.
@@ -76,7 +118,8 @@ def extract_event(subject: str, body: str, sender: str = '', today: str = '') ->
                  — but the server runs in UTC, so prefer sending the client's date.
 
     Returns:
-        Dict matching the response schema defined in CLAUDE.md.
+        Dict of the form {"events": [ {event}, ... ]} — an empty list when no
+        scheduling information is found. Each event matches the schema in CLAUDE.md.
 
     Raises:
         ValueError: If Claude returns output that cannot be parsed as JSON.
@@ -92,7 +135,9 @@ def extract_event(subject: str, body: str, sender: str = '', today: str = '') ->
 
     response = _get_client().messages.create(
         model=MODEL,
-        max_tokens=512,
+        # Room for several events; a single event is ~120 tokens, so this covers
+        # roughly a dozen before truncation.
+        max_tokens=1500,
         system=SYSTEM_PROMPT,
         messages=[
             {'role': 'user', 'content': f"Today's date: {today}\n\nEMAIL:\n{email_text}"}
@@ -101,12 +146,15 @@ def extract_event(subject: str, body: str, sender: str = '', today: str = '') ->
 
     raw = response.content[0].text.strip()
 
-    # Strip any accidental markdown code fences (```json ... ```)
+    # Grab the outermost JSON object, tolerating accidental markdown fences
+    # (```json ... ```) or stray prose around it.
     json_match = re.search(r'\{[\s\S]*\}', raw)
     if not json_match:
         raise ValueError(f'Claude returned no JSON. Raw output: {raw[:300]}')
 
     try:
-        return json.loads(json_match.group())
+        parsed = json.loads(json_match.group())
     except json.JSONDecodeError as e:
         raise ValueError(f'Claude returned invalid JSON: {e}. Raw: {raw[:300]}')
+
+    return _normalize(parsed)

@@ -57,7 +57,7 @@ def clean_email(text: str) -> str:
     4. Truncate at the first signature marker
     5. Normalize whitespace
 
-    Returns the cleaned plain text, max ~3000 chars.
+    Returns the cleaned plain text, max ~6000 chars.
     """
     text = _strip_html(text)
 
@@ -95,5 +95,7 @@ def clean_email(text: str) -> str:
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     cleaned = cleaned.strip()
 
-    # Cap length to keep API calls cheap
-    return cleaned[:3000]
+    # Cap length to keep API calls cheap. Scheduling details often sit at the very
+    # END of an email (after a long recap/thread), so this cap must be generous
+    # enough not to truncate them away before the AI sees them.
+    return cleaned[:6000]

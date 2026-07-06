@@ -10,7 +10,7 @@ const settingsBtn    = document.getElementById('settings-btn');
 
 async function init() {
   const data = await chrome.storage.local.get([
-    'status', 'event', 'error', 'emailData', 'notificationMode'
+    'status', 'events', 'error', 'emailData', 'notificationMode'
   ]);
   currentState = data;
   render(data);
@@ -38,12 +38,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Routing ─────────────────────────────────────────────────────────────────
 
 function render(data) {
-  const { status, event, error } = data;
+  const { status, events, error } = data;
 
   switch (status) {
     case 'processing': renderProcessing(); break;
     case 'done':
-      event && event.event_found ? renderEvent(event) : renderNoEvent('done');
+      (events && events.length) ? renderEvents(events) : renderNoEvent('done');
       break;
     case 'error':   renderError(error);   break;
     case 'idle':    renderIdle();          break;
@@ -72,7 +72,27 @@ const ICON = {
   title: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg>',
 };
 
-function renderEvent(event) {
+// Render every detected event as a stacked list of editable cards, each with its
+// own "Add to Calendar" button so the user can add any or all of them.
+function renderEvents(events) {
+  const count = events.length;
+  const heading = count === 1 ? '1 event detected' : `${count} events detected`;
+
+  const cardsHTML = events.map((event, i) => buildEventCard(event, i)).join('');
+
+  mainContent.innerHTML = `
+    <div class="event-view">
+      <div class="events-header">${heading}</div>
+      <div class="events-list">${cardsHTML}</div>
+    </div>
+  `;
+
+  events.forEach((event, i) => wireEventCard(event, i));
+}
+
+// HTML for one event card. All field ids are suffixed with the card index so the
+// stacked cards don't collide.
+function buildEventCard(event, i) {
   const pct   = confidencePercent(event);
   const level = confidenceLevel(pct);
 
@@ -82,8 +102,8 @@ function renderEvent(event) {
   const initialDur = durationFromTimes(startVal, endVal);
   const durHint    = initialDur ? 'Duration: ' + formatDuration(initialDur) : '';
 
-  mainContent.innerHTML = `
-    <div class="event-view">
+  return `
+    <section class="event-block" data-idx="${i}">
       <div class="confidence">
         <div class="confidence-head">
           <span class="confidence-label">Confidence</span>
@@ -94,54 +114,62 @@ function renderEvent(event) {
         </div>
       </div>
 
-      <form class="event-card" id="event-form" autocomplete="off">
+      <form class="event-card" id="event-form-${i}" autocomplete="off">
         <label class="field">
           <span class="field-label">${ICON.title} Title</span>
-          <input type="text" id="f-title" class="field-input" value="${esc(event.title || '')}" placeholder="Event title" />
+          <input type="text" id="f-title-${i}" class="field-input" value="${esc(event.title || '')}" placeholder="Event title" />
         </label>
 
         <label class="field emph">
           <span class="field-label">${ICON.calendar} Date</span>
-          <input type="date" id="f-date" class="field-input" value="${esc(event.date || '')}" />
+          <input type="date" id="f-date-${i}" class="field-input" value="${esc(event.date || '')}" />
         </label>
 
         <div class="field-row">
           <label class="field emph">
             <span class="field-label">${ICON.clock} Starts</span>
-            <input type="time" id="f-time" class="field-input" value="${esc(startVal)}" />
+            <input type="time" id="f-time-${i}" class="field-input" value="${esc(startVal)}" />
           </label>
           <label class="field emph">
             <span class="field-label">${ICON.clock} Ends</span>
-            <input type="time" id="f-endtime" class="field-input" value="${esc(endVal)}" />
+            <input type="time" id="f-endtime-${i}" class="field-input" value="${esc(endVal)}" />
           </label>
         </div>
-        <div class="end-hint" id="end-hint">${durHint}</div>
+        <div class="end-hint" id="end-hint-${i}">${durHint}</div>
 
         <label class="field">
           <span class="field-label">${ICON.location} Location</span>
-          <input type="text" id="f-location" class="field-input" value="${esc(event.location || '')}" placeholder="Add location" />
+          <input type="text" id="f-location-${i}" class="field-input" value="${esc(event.location || '')}" placeholder="Add location" />
         </label>
 
         <label class="field">
           <span class="field-label">${ICON.description} Description</span>
-          <textarea id="f-desc" class="field-input" rows="2" placeholder="Add description">${esc(event.description || '')}</textarea>
+          <textarea id="f-desc-${i}" class="field-input" rows="2" placeholder="Add description">${esc(event.description || '')}</textarea>
         </label>
       </form>
 
-      <button id="add-cal-btn" class="btn cal full-width">${ICON.calendar} Add to Calendar</button>
-      <button id="dismiss-btn" class="dismiss-link">Not an event? Dismiss</button>
-    </div>
+      <button id="add-cal-btn-${i}" class="btn cal full-width">${ICON.calendar} Add to Calendar</button>
+      <button id="dismiss-btn-${i}" class="dismiss-link">Not an event? Dismiss</button>
+    </section>
   `;
+}
+
+// Attach behaviour to the card at index `i` after it's in the DOM.
+function wireEventCard(event, i) {
+  const block = mainContent.querySelector(`.event-block[data-idx="${i}"]`);
+  if (!block) return;
+
+  const pct = confidencePercent(event);
 
   // Animate the confidence bar from 0 → pct on the next frame so the CSS
   // width transition plays instead of snapping.
-  const fill = mainContent.querySelector('.confidence-fill');
+  const fill = block.querySelector('.confidence-fill');
   if (fill) requestAnimationFrame(() => { fill.style.width = pct + '%'; });
 
   // Live-update the "Duration: …" hint as start/end are edited.
-  const startInput = document.getElementById('f-time');
-  const endInput   = document.getElementById('f-endtime');
-  const endHint    = document.getElementById('end-hint');
+  const startInput = document.getElementById(`f-time-${i}`);
+  const endInput   = document.getElementById(`f-endtime-${i}`);
+  const endHint    = document.getElementById(`end-hint-${i}`);
   const refreshDurHint = () => {
     const dur = durationFromTimes(startInput.value, endInput.value);
     endHint.textContent = dur ? 'Duration: ' + formatDuration(dur) : '';
@@ -149,32 +177,46 @@ function renderEvent(event) {
   startInput.addEventListener('input', refreshDurHint);
   endInput.addEventListener('input', refreshDurHint);
 
-  // Build the (possibly edited) event from the form and create it directly on
-  // Google Calendar — no calendar tab, no manual Save.
+  // Build the (possibly edited) event from this card's form and create it
+  // directly on Google Calendar — no calendar tab, no manual Save.
   const submit = () => {
-    const start = valueOf('f-time')    || null;
-    const end   = valueOf('f-endtime') || null;
+    const start = valueOf(`f-time-${i}`)    || null;
+    const end   = valueOf(`f-endtime-${i}`) || null;
     const edited = {
-      title:            valueOf('f-title')    || 'Event',
-      date:             valueOf('f-date')     || null,
+      title:            valueOf(`f-title-${i}`)    || 'Event',
+      date:             valueOf(`f-date-${i}`)     || null,
       time:             start,
       duration_minutes: durationFromTimes(start, end) || event.duration_minutes || null,
-      location:         valueOf('f-location') || null,
-      description:      valueOf('f-desc')     || null,
+      location:         valueOf(`f-location-${i}`) || null,
+      description:      valueOf(`f-desc-${i}`)     || null,
     };
-    createEvent(edited);
+    createEvent(edited, document.getElementById(`add-cal-btn-${i}`));
   };
 
-  document.getElementById('add-cal-btn').addEventListener('click', submit);
-  document.getElementById('event-form').addEventListener('submit', (e) => {
+  document.getElementById(`add-cal-btn-${i}`).addEventListener('click', submit);
+  document.getElementById(`event-form-${i}`).addEventListener('submit', (e) => {
     e.preventDefault();
     submit();
   });
 
-  document.getElementById('dismiss-btn').addEventListener('click', async () => {
-    await chrome.storage.local.set({ status: 'idle', event: null });
+  document.getElementById(`dismiss-btn-${i}`).addEventListener('click', () => dismissEvent(i));
+}
+
+// Remove one card from the stored list and re-render. When the last card is
+// dismissed, fall back to the empty state.
+async function dismissEvent(i) {
+  const data = await chrome.storage.local.get(['events']);
+  const events = Array.isArray(data.events) ? data.events.slice() : [];
+  events.splice(i, 1);
+
+  if (events.length) {
+    await chrome.storage.local.set({ events });
+    currentState.events = events;
+    renderEvents(events);
+  } else {
+    await chrome.storage.local.set({ status: 'idle', events: null });
     renderIdle();
-  });
+  }
 }
 
 function valueOf(id) {
@@ -299,8 +341,7 @@ document.querySelectorAll('input[name="notif-mode"]').forEach(radio => {
 // backend. No calendar tab opens; the button shows Creating → Added ✓ / error
 // right here in the popup.
 
-async function createEvent(event) {
-  const btn = document.getElementById('add-cal-btn');
+async function createEvent(event, btn) {
   if (!btn) return;
 
   if (!event.date) {
@@ -322,7 +363,7 @@ async function createEvent(event) {
   } else {
     const msg = (result && result.error) || 'Could not create the event.';
     setButtonState(btn, 'error', 'Failed — try again');
-    showActionError(msg);
+    showActionError(btn, msg);
   }
 }
 
@@ -339,14 +380,14 @@ function setButtonState(btn, state, label) {
     : `${ICON.calendar} ${esc(label)}`;
 }
 
-// Show a small inline error under the button (e.g. backend not running).
-function showActionError(msg) {
-  let box = document.getElementById('action-error');
-  if (!box) {
+// Show a small inline error directly under the given button (e.g. backend not
+// running). Scoped per-button so each card shows its own error.
+function showActionError(btn, msg) {
+  let box = btn.nextElementSibling;
+  if (!box || !box.classList.contains('action-error')) {
     box = document.createElement('p');
-    box.id = 'action-error';
     box.className = 'action-error';
-    document.getElementById('add-cal-btn').insertAdjacentElement('afterend', box);
+    btn.insertAdjacentElement('afterend', box);
   }
   box.textContent = msg;
 }
