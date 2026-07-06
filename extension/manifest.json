@@ -13,7 +13,7 @@
     "https://www.googleapis.com/*"
   ],
   "oauth2": {
-    "client_id": "262145028639-v4kq92hrrof3pi4jacvn9ckaauvcspg3.apps.googleusercontent.com",
+    "client_id": "262145028639-cc2t5r3e8374b9ginju3psgroq2ns0bt.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/calendar.events"]
   },
   "background": {
