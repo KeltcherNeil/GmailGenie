@@ -10,7 +10,7 @@
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
     "http://localhost:5001/*",
-    "https://*.run.app/*",
+    "https://gmailgenie-485353812643.us-central1.run.app/*",
     "https://www.googleapis.com/*"
   ],
   "oauth2": {

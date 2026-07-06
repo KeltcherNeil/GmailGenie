@@ -7,10 +7,10 @@ console.log('[GmailGenie] background service worker loaded (hosted-extraction bu
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
-//   • Local dev:  http://localhost:5001
-//   • Production: your Cloud Run URL, e.g. https://gmailgenie-xxxxxxxx-uc.a.run.app
+//   • Production (Cloud Run): the URL below.
+//   • Local dev: swap to 'http://localhost:5001' and run backend/ locally.
 // Keep this in sync with the host_permissions entry in manifest.json.
-const BACKEND_URL = 'http://localhost:5001';
+const BACKEND_URL = 'https://gmailgenie-485353812643.us-central1.run.app';
 
 // Track the latest processing job to ignore stale results when emails change quickly
 let currentJobId = null;
