@@ -316,17 +316,17 @@ tried to detect the save and close the tab. It was unreliable and has been delet
 - `extension/popup.js` → `createEvent()` — sends `CREATE_EVENT`, renders the button states.
 - `extension/content.js` → `createEventFromCard()` — same for the floating card.
 - `extension/background.js` → `CREATE_EVENT` handler + `createCalendarEvent()` — gets the OAuth
-  token via `chrome.identity` and calls the Google Calendar API directly. `buildEventBody()` ports
-  the old `calendar_helper.build_event_body()` to JS (with real timezone via `Intl`).
+  token via `chrome.identity` and calls the Google Calendar API directly. `buildEventBody()`
+  builds the Calendar API event resource (with real timezone via `Intl`).
 - `extension/manifest.json` → `oauth2` block (client ID + `calendar.events` scope) and the
   `identity` permission.
 
 **Requirement:** a Google OAuth **Chrome-Extension** client ID must be set in `manifest.json`'s
 `oauth2.client_id` (see "Google OAuth setup" below). Each user consents once in their own browser;
-Chrome caches and refreshes the token automatically. The old server-side calendar code
-(`backend/calendar_helper.py`, `credentials.json`, `token.json`, the `/create-event` route, and
-the Google client libraries in `requirements.txt`) has been **removed** — the backend no longer
-touches Google Calendar.
+Chrome caches and refreshes the token automatically. The old server-side calendar code and its
+OAuth client-secret / token files were **removed** — the backend no longer touches Google Calendar,
+so no Google credentials or tokens live on the server or in this repo. The backend's only secret is
+the Anthropic key, which is held in Secret Manager (never committed).
 
 ---
 

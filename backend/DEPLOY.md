@@ -76,9 +76,10 @@ curl https://gmailgenie-xxxxxxxx-uc.a.run.app/health   # → {"status":"ok"}
    multiple instances, the effective limit is `limit × instances`. Good enough as a
    floor; not a hard global cap.
 
-**Phase 2** replaces this with per-user auth: the extension already does Google
-sign-in for Calendar, so pass that Google ID token, verify it here, and rate-limit
-per Google account. That ties spend to a real identity and is the real fix.
+**Phase 2 (implemented):** per-user auth in `auth.py`. The extension sends the user's
+Google token; the backend verifies it was minted for this extension's OAuth client
+(`GOOGLE_CLIENT_ID`) and rate-limits per Google account. Enable it by setting
+`GOOGLE_CLIENT_ID`; leave it unset only for local dev.
 
 ## Hardening (recommended before any real launch)
 
@@ -88,7 +89,7 @@ per Google account. That ties spend to a real identity and is the real fix.
   gcloud run deploy gmailgenie --source backend --region us-central1 \
     --allow-unauthenticated \
     --update-secrets "ANTHROPIC_API_KEY=anthropic-key:latest" \
-    --set-env-vars "ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
+    --set-env-vars "ALLOWED_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com"
   ```
 - **Global rate limits**: point flask-limiter at Redis/Memorystore via a
   `storage_uri` so limits hold across instances.
