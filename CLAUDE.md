@@ -253,6 +253,89 @@ See `backend/DEPLOY.md` for first-time setup, secrets, and hardening.
 
 ---
 
+## Publishing to the Chrome Web Store (launch checklist)
+
+Detailed final steps to take GmailGenie from "works for test users" to a public
+install. **Current state (2026-07-07):**
+
+- Everything lives in GCP project **`gmailgenie-neil-4821`** (owner `n87821395@gmail.com`).
+- OAuth client **`485353812643-d4sfmug4qjl03sk13dljbhkq0sojk4vf.apps.googleusercontent.com`**
+  (type Chrome Extension), set in `manifest.json` `oauth2.client_id` and backend `GOOGLE_CLIENT_ID`.
+- Stable dev extension ID **`hlhkdgonhlbhpbgmocoifmhineflnlkk`** (pinned by the `key` in
+  `manifest.json`; private key `extension-key.pem`, gitignored).
+- Custom domain **`getgenie-mail.xyz`** (Porkbun) → GitHub Pages, HTTPS enforced.
+  Home `https://getgenie-mail.xyz/`, privacy `https://getgenie-mail.xyz/privacy.html`.
+  Verified in Google Search Console.
+- Backend enforces per-user Google auth; app OAuth status is **Testing** (test users only).
+
+### Step 1 — Finish OAuth consent + verification  *(in progress)*
+1. Console → **APIs & Services → OAuth consent screen** (a.k.a. Google Auth Platform),
+   project `gmailgenie-neil-4821`.
+2. **Branding:** App name `GmailGenie`; support email; App home page
+   `https://getgenie-mail.xyz/`; Privacy policy `https://getgenie-mail.xyz/privacy.html`;
+   **Authorized domains:** `getgenie-mail.xyz`.
+3. **Data Access:** scopes `openid`, `email`, `.../auth/calendar.events`.
+4. **Audience → Publish app** (Testing → In production).
+5. **Verification Center → submit for verification.** Scope justifications: see
+   `STORE_LISTING.md` §5. `calendar.events` is **sensitive** (not restricted, because we
+   scrape the Gmail DOM instead of using a Gmail API scope) → standard verification, no
+   CASA security assessment.
+6. Google usually emails asking for an **unlisted YouTube demo video** showing the consent
+   flow + the extension creating a calendar event. Reply with it.
+7. **Wait:** sensitive-scope verification typically takes a few days to ~2 weeks.
+
+### Step 2 — Package the extension
+```bash
+cd extension && zip -r ../gmailgenie-<version>.zip . -x '.*'
+```
+- Bump `manifest.json` `version` for every upload (the store rejects duplicate versions).
+- **`key` caveat:** the manifest currently pins a `key` for a stable *dev* ID. The Web Store
+  assigns its **own** ID on first upload, which will differ from `hlhkdgon…` unless you
+  deliberately keep the same key. Simplest path: upload as-is, note the **published ID** the
+  store assigns, then reconcile in Step 4.
+
+### Step 3 — Chrome Web Store submission
+1. Register a **Chrome Web Store developer account** — one-time **$5** fee
+   (https://chrome.google.com/webstore/devconsole).
+2. Create item → upload the zip → fill the listing (copy in `STORE_LISTING.md` §2),
+   **Privacy practices** disclosures (§4), and screenshots.
+3. Submit for review. Extension review (separate from OAuth verification) is usually hours
+   to a few days.
+
+### Step 4 — Post-publish reconciliation  *(CRITICAL — do immediately after publish)*
+The store assigns a new extension ID. Then:
+1. Console → **Clients** → edit the OAuth client → set **Item ID** to the published ID.
+2. Update backend `ALLOWED_ORIGINS=chrome-extension://<published-id>` and redeploy:
+   ```bash
+   gcloud run deploy gmailgenie --source backend --region us-central1 \
+     --update-env-vars "ALLOWED_ORIGINS=chrome-extension://<published-id>"
+   ```
+3. Install from the store → Connect Google → confirm extraction + event creation work.
+
+---
+
+## Costs (everything that costs money)
+
+| Item | Cost | Notes |
+|---|---|---|
+| **Chrome Web Store developer account** | **$5 one-time** | Required to publish any extension. |
+| **Domain `getgenie-mail.xyz`** (Porkbun) | ~**$2.04 first year, ~$12.98/yr** renewal | Only needed for OAuth verification (authorized domain + privacy host). Auto-renew optional. |
+| **Anthropic API (Claude)** | **Pay-per-use — main variable cost** | One `MODEL` call (Haiku, see `extractor.py`) per email extraction. Small per call, but scales with users. **Set a hard limit** at console.anthropic.com → Billing → Usage limits. |
+| **Google Cloud Run** | **~$0 at low traffic** | Scales to zero (min-instances 0); generous free tier. Budget alert set at $25/mo. Cost only if traffic is high or you set min-instances ≥1 (~$7/mo). |
+| Cloud Build (runs on each deploy) | Negligible | Within free tier for normal deploy cadence. |
+| Secret Manager (Anthropic key) | Negligible | Fractions of a cent/month. |
+| Google OAuth verification | Free | — |
+| Google Search Console | Free | — |
+| GitHub Pages (privacy/home hosting) | Free | — |
+| Google Calendar API | Free | Standard quota is ample. |
+
+**Bottom line:** fixed costs are tiny (**$5 once + ~$2–13/yr domain**). The only cost that
+grows with usage is the **Anthropic API** — protect it with a per-account usage limit in the
+Anthropic console (the backend already caps *anonymous* abuse via per-user auth). Cloud Run
+is effectively free until real scale.
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
