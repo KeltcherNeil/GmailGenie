@@ -302,6 +302,145 @@ textarea.field-input { resize: vertical; min-height: 32px; line-height: 1.4; }
   padding-left: 2px;
 }
 
+/* ── Availability wizard ─────────────────────── */
+.wiz-block {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.wiz-text, .wiz-question {
+  font-size: 13.5px;
+  color: var(--ink);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.wiz-question { font-weight: 600; }
+
+.wiz-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.wiz-error {
+  font-size: 12.5px;
+  color: var(--low);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.wiz-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.spinner-sm { width: 20px; height: 20px; flex-shrink: 0; }
+
+/* Choice chips (days, parts of day) */
+.chip-col {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s, box-shadow 0.15s;
+}
+.chip:hover:not(:disabled) {
+  border-color: var(--accent-2);
+  background: #fff;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.chip:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.chip-sub {
+  font-weight: 500;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.chip-booked {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--low);
+  text-decoration: none;
+}
+
+.wiz-back {
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 0 2px;
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-family: inherit;
+}
+.wiz-back:hover { text-decoration: underline; }
+
+/* Recommendation card */
+.wiz-rec {
+  background: linear-gradient(135deg, rgba(106, 17, 203, 0.07), rgba(37, 117, 252, 0.07));
+  border: 1px solid rgba(106, 17, 203, 0.18);
+  border-radius: 12px;
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+
+.wiz-rec-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.wiz-rec-when .mi { width: 16px; height: 16px; }
+
+.wiz-rec-title {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.wiz-reply-btn { margin-top: 8px; }
+
+.wiz-block .field { margin-bottom: 10px; }
+
 /* ── No event / idle ─────────────────────────── */
 .empty-view {
   text-align: center;

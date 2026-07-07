@@ -75,7 +75,7 @@ function checkForEmailChange() {
     // Not in an email view — reset so the popup shows idle state
     if (lastEmailId !== null) {
       lastEmailId = null;
-      chrome.storage.local.set({ status: 'idle', events: null, error: null, emailData: null });
+      chrome.storage.local.set({ status: 'idle', events: null, availability: null, error: null, emailData: null });
     }
     return;
   }
@@ -411,12 +411,75 @@ function createEventFromCard(ev, i) {
   });
 }
 
+// Compact card shown when the email asks for the reader's availability
+// ("when can you play tennis?"). The actual day/time wizard lives in the popup
+// — this card just surfaces the detection and opens it.
+function showAvailabilityCard(availability) {
+  removeCard();
+  const card = document.createElement('div');
+  card.id = CARD_ID;
+  card.innerHTML = `
+    <style>
+      #gmailgenie-floating-card {
+        position: fixed; bottom: 24px; right: 24px; width: 312px;
+        background: #fff; border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(24,28,40,0.22);
+        font-family: 'Google Sans', Roboto, -apple-system, Arial, sans-serif;
+        font-size: 14px; color: #1f2430;
+        z-index: 2147483647; border: 1px solid #eef0f4; overflow: hidden;
+        animation: gg-in 0.28s cubic-bezier(0.22,1,0.36,1);
+      }
+      @keyframes gg-in {
+        from { transform: translateY(16px); opacity: 0; }
+        to   { transform: translateY(0);    opacity: 1; }
+      }
+      #gmailgenie-floating-card .gg-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 13px 16px; color: #fff;
+        background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+      }
+      #gmailgenie-floating-card .gg-head-title { font-size: 12.5px; font-weight: 600; }
+      #gmailgenie-floating-card .gg-x {
+        background: none; border: none; color: #fff; cursor: pointer;
+        font-size: 15px; opacity: 0.85; padding: 0; line-height: 1;
+      }
+      #gmailgenie-floating-card .gg-body { padding: 14px 16px 16px; }
+      #gmailgenie-floating-card .gg-text { font-size: 13px; color: #4b5160; line-height: 1.5; }
+      #gmailgenie-floating-card .gg-btn {
+        display: block; width: 100%; margin-top: 12px; padding: 11px;
+        background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+        color: #fff; border: none; border-radius: 11px;
+        font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+        box-shadow: 0 6px 16px rgba(37,117,252,0.28);
+      }
+    </style>
+    <div class="gg-head">
+      <span class="gg-head-title">&#128337; Availability request detected</span>
+      <button class="gg-x" id="gg-close">&#10005;</button>
+    </div>
+    <div class="gg-body">
+      <div class="gg-text">${esc(availability.requester_name || 'The sender')} asked when you can <b>${esc(availability.activity)}</b>. GmailGenie can check your calendar and suggest a time.</div>
+      <button class="gg-btn" id="gg-pick-time">Pick a time</button>
+    </div>
+  `;
+  document.body.appendChild(card);
+  document.getElementById('gg-close').addEventListener('click', removeCard);
+  document.getElementById('gg-pick-time').addEventListener('click', () => {
+    safeSendMessage({ type: 'OPEN_EDITOR' });
+    removeCard();
+  });
+}
+
 // Watch storage — show or remove card based on current mode
 chrome.storage.onChanged.addListener((_, area) => {
   if (area !== 'local') return;
-  chrome.storage.local.get(['status', 'events', 'notificationMode'], (data) => {
-    if (data.status === 'done' && data.events?.length && data.notificationMode === 'card') {
-      showEventCard(data.events);
+  chrome.storage.local.get(['status', 'events', 'availability', 'notificationMode'], (data) => {
+    if (data.status === 'done' && data.notificationMode === 'card') {
+      if (data.events?.length) {
+        showEventCard(data.events);          // events card wins when both exist
+      } else if (data.availability) {
+        showAvailabilityCard(data.availability);
+      }
     } else if (data.status === 'idle') {
       removeCard();
     }

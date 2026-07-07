@@ -31,6 +31,8 @@ from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 
 import auth
+import availability
+import composer
 from email_cleaner import clean_email
 from extractor import extract_event
 
@@ -86,6 +88,30 @@ def _is_preflight() -> bool:
     return request.method == 'OPTIONS'
 
 
+def _request_gate():
+    """
+    Shared guard for every Claude/credit-spending route: CORS preflight,
+    origin allowlist, and per-user Google auth (verified by _rate_key, which
+    the rate limiter runs before the view — the result is cached on flask.g).
+
+    Returns a (response, status) pair to short-circuit with, or None to proceed.
+    """
+    if request.method == 'OPTIONS':
+        # CORS preflight — headers are added by add_cors_headers.
+        return ('', 204)
+
+    origin = request.headers.get('Origin', '')
+    if not _origin_allowed(origin):
+        app.logger.warning('Rejected request from disallowed origin: %r', origin)
+        return jsonify({'error': 'Origin not allowed'}), 403
+
+    # A 401 tells the extension to prompt the user to connect their Google account.
+    if auth.auth_enabled() and not getattr(g, 'gg_user', None):
+        return jsonify({'error': 'Google sign-in required'}), 401
+
+    return None
+
+
 # ── CORS + origin allowlist ────────────────────────────────────────────────────
 # The Chrome extension calls this backend from a background service worker. We echo
 # CORS headers so the request works regardless of how Chrome classifies it, but we
@@ -136,21 +162,9 @@ def extract_event_route():
         On success — the event object from extractor.py (event_found: true/false)
         On error   — { "error": "description" }
     """
-    if request.method == 'OPTIONS':
-        # CORS preflight — headers are added by add_cors_headers.
-        return ('', 204)
-
-    # Origin allowlist (skipped in dev when ALLOWED_ORIGINS is unset).
-    origin = request.headers.get('Origin', '')
-    if not _origin_allowed(origin):
-        app.logger.warning('Rejected request from disallowed origin: %r', origin)
-        return jsonify({'error': 'Origin not allowed'}), 403
-
-    # Per-user auth (skipped in dev when GOOGLE_CLIENT_ID is unset). _rate_key()
-    # already verified the token and stashed the result on g; reuse it here. A 401
-    # tells the extension to prompt the user to connect their Google account.
-    if auth.auth_enabled() and not getattr(g, 'gg_user', None):
-        return jsonify({'error': 'Google sign-in required'}), 401
+    denied = _request_gate()
+    if denied:
+        return denied
 
     data = request.get_json(silent=True)
 
@@ -181,6 +195,124 @@ def extract_event_route():
         # Unexpected errors (API down, network issues, etc.)
         app.logger.error('Extraction failed: %s', exc)
         return jsonify({'error': 'Internal server error'}), 500
+
+
+# ── Availability scheduling ──────────────────────────────────────────────────
+# When an email asks the reader for a time ("when can you play tennis?"), the
+# extension walks the user through day → part-of-day → recommended slot. The
+# calendar is read CLIENT-SIDE; only anonymous busy blocks (start/end stamps in
+# the user's local wall-clock, no titles) are sent here. Slot math is
+# deterministic (availability.py); Claude only drafts the reply email.
+
+def _parse_availability_request(data):
+    """Shared body validation: returns (busy, now, duration) or raises ValueError."""
+    if not data:
+        raise ValueError('Request body must be JSON')
+    now = (data.get('now') or '').strip()
+    if not now:
+        raise ValueError("Missing required field: 'now'")
+    busy = data.get('busy')
+    if busy is not None and not isinstance(busy, list):
+        raise ValueError("'busy' must be a list")
+    try:
+        duration = int(data.get('duration_minutes') or availability.DEFAULT_DURATION_MINUTES)
+    except (TypeError, ValueError):
+        raise ValueError("'duration_minutes' must be an integer")
+    duration = max(15, min(duration, 8 * 60))  # sane bounds
+    return busy or [], now, duration
+
+
+@app.route('/availability/options', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
+def availability_options_route():
+    """
+    Day/bucket choices for the availability wizard. No Claude call.
+
+    Request body (JSON):
+        {
+            "busy": [{"start": "YYYY-MM-DDTHH:MM", "end": "..."}, ...],
+            "now": "YYYY-MM-DDTHH:MM",     # user's local now
+            "duration_minutes": 60          # optional
+        }
+
+    Response: {"days": [{"date", "label", "buckets": {morning/midday/evening: bool}}]}
+    Fully-booked days are omitted — the UI never offers a day that can't work.
+    """
+    denied = _request_gate()
+    if denied:
+        return denied
+
+    try:
+        busy, now, duration = _parse_availability_request(request.get_json(silent=True))
+        days = availability.build_options(busy, now, duration_minutes=duration)
+        return jsonify({'days': days}), 200
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        app.logger.error('Availability options failed: %s', exc)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/availability/recommend', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
+def availability_recommend_route():
+    """
+    Recommend an exact slot for the chosen day + bucket and draft the reply.
+
+    Request body (JSON): the options fields above, plus
+        {
+            "date": "YYYY-MM-DD",           # chosen day
+            "bucket": "morning" | "midday" | "evening",
+            "activity": "play tennis",
+            "requester_name": "Sam",        # optional
+            "sender": "sam@example.com",    # optional
+            "subject": "Tennis?"            # optional, for the Re: subject
+        }
+
+    Response:
+        {"date", "start_time", "end_time", "duration_minutes",
+         "reply_subject", "reply_body"}
+    409 when the bucket has no free slot (calendar changed since options).
+    """
+    denied = _request_gate()
+    if denied:
+        return denied
+
+    data = request.get_json(silent=True)
+    try:
+        busy, now, duration = _parse_availability_request(data)
+        day    = (data.get('date') or '').strip()
+        bucket = (data.get('bucket') or '').strip()
+        if not day or not bucket:
+            raise ValueError("Missing required field: 'date' and 'bucket' are required")
+        slot = availability.pick_slot(busy, day, bucket, duration_minutes=duration, now=now)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        app.logger.error('Availability recommend failed: %s', exc)
+        return jsonify({'error': 'Internal server error'}), 500
+
+    if slot is None:
+        return jsonify({'error': 'No free slot in that time of day — pick another'}), 409
+
+    start, end = slot
+    reply = composer.compose_reply(
+        activity=(data.get('activity') or 'meet up').strip(),
+        requester_name=(data.get('requester_name') or '').strip(),
+        start=start,
+        end=end,
+        subject=(data.get('subject') or '').strip(),
+        sender=(data.get('sender') or '').strip(),
+    )
+
+    return jsonify({
+        'date': start.date().isoformat(),
+        'start_time': start.strftime('%H:%M'),
+        'end_time': end.strftime('%H:%M'),
+        'duration_minutes': duration,
+        'reply_subject': reply['reply_subject'],
+        'reply_body': reply['reply_body'],
+    }), 200
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

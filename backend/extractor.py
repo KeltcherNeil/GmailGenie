@@ -52,6 +52,24 @@ The top-level value is always an object with an "events" array:
   ]
 }
 
+Additionally, detect when the email ASKS THE READER for their availability —
+the sender wants the READER to propose a time ("when can you play tennis?",
+"what times work for you?", "when are you free to grab lunch?"). Report it in
+an "availability_request" field next to "events":
+{
+  "events": [...],
+  "availability_request": {
+    "activity": "short verb phrase for what is being scheduled, e.g. 'play tennis'",
+    "duration_minutes": estimated typical duration as an integer (default 60),
+    "requester_name": "sender's first name if evident, else null",
+    "confidence": "high" | "medium" | "low"
+  }
+}
+Set "availability_request" to null when the email does not ask the reader for
+a time. An email that proposes a SPECIFIC time ("tennis Friday at 3?") is an
+event, NOT an availability request. An email can contain both — concrete
+event(s) AND an open "when are you free?" question — return both.
+
 If no event is found, return {"events": []}.
 
 Rules:
@@ -77,7 +95,8 @@ Rules:
 
 def _normalize(parsed: dict) -> dict:
     """
-    Coerce whatever the model returned into the canonical {"events": [...]} shape.
+    Coerce whatever the model returned into the canonical
+    {"events": [...], "availability_request": {...}|None} shape.
 
     Accepts:
       - the current shape: {"events": [ {...}, ... ]}
@@ -86,22 +105,25 @@ def _normalize(parsed: dict) -> dict:
       - a bare event object with no wrapper
     so a prompt hiccup can't drop otherwise-valid events on the floor.
     """
+    # availability_request must be a dict with at least an activity to be usable.
+    availability = parsed.get('availability_request')
+    if not (isinstance(availability, dict) and availability.get('activity')):
+        availability = None
+
     events = parsed.get('events')
     if isinstance(events, list):
-        return {'events': [e for e in events if isinstance(e, dict)]}
+        events = [e for e in events if isinstance(e, dict)]
+    elif parsed.get('event_found') is True:
+        # Legacy single-event shape.
+        events = [{k: v for k, v in parsed.items() if k != 'event_found'}]
+    elif parsed.get('event_found') is not False and any(
+            k in parsed for k in ('title', 'date', 'time')):
+        # A bare event object (has a title/date/time but no wrapper) → wrap it.
+        events = [parsed]
+    else:
+        events = []
 
-    # Legacy single-event shapes.
-    if parsed.get('event_found') is False:
-        return {'events': []}
-    if parsed.get('event_found') is True:
-        event = {k: v for k, v in parsed.items() if k != 'event_found'}
-        return {'events': [event]}
-
-    # A bare event object (has a title/date/time but no wrapper) → wrap it.
-    if any(k in parsed for k in ('title', 'date', 'time')):
-        return {'events': [parsed]}
-
-    return {'events': []}
+    return {'events': events, 'availability_request': availability}
 
 
 def extract_event(subject: str, body: str, sender: str = '', today: str = '') -> dict:
@@ -118,8 +140,10 @@ def extract_event(subject: str, body: str, sender: str = '', today: str = '') ->
                  — but the server runs in UTC, so prefer sending the client's date.
 
     Returns:
-        Dict of the form {"events": [ {event}, ... ]} — an empty list when no
-        scheduling information is found. Each event matches the schema in CLAUDE.md.
+        Dict of the form {"events": [...], "availability_request": {...}|None}.
+        "events" is empty when no scheduling information is found;
+        "availability_request" is set when the email asks the READER for a
+        time (e.g. "when can you play tennis?"). Schemas are in CLAUDE.md.
 
     Raises:
         ValueError: If Claude returns output that cannot be parsed as JSON.

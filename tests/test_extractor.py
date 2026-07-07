@@ -210,6 +210,54 @@ class TestExtractor(unittest.TestCase):
         self.assertEqual(result['events'][0]['title'], 'Lunch')
 
     @patch('extractor._get_client')
+    def test_availability_request_detected(self, mock_get_client):
+        """'When can you play tennis?' → availability_request, no events."""
+        mock_get_client.return_value = _patch_claude({
+            'events': [],
+            'availability_request': {
+                'activity': 'play tennis', 'duration_minutes': 90,
+                'requester_name': 'Sam', 'confidence': 'high',
+            },
+        })
+
+        result = extractor.extract_event(
+            subject='Tennis?', body='Hey! When can you play tennis this week? - Sam'
+        )
+
+        self.assertEqual(result['events'], [])
+        self.assertEqual(result['availability_request']['activity'], 'play tennis')
+        self.assertEqual(result['availability_request']['requester_name'], 'Sam')
+
+    @patch('extractor._get_client')
+    def test_availability_request_defaults_to_none(self, mock_get_client):
+        """A model reply without the field still yields availability_request=None."""
+        mock_get_client.return_value = _patch_claude({'events': []})
+        result = extractor.extract_event(subject='x', body='newsletter text')
+        self.assertIsNone(result['availability_request'])
+
+    @patch('extractor._get_client')
+    def test_availability_request_without_activity_dropped(self, mock_get_client):
+        """A malformed availability_request (no activity) is coerced to None."""
+        mock_get_client.return_value = _patch_claude({
+            'events': [], 'availability_request': {'confidence': 'low'},
+        })
+        result = extractor.extract_event(subject='x', body='y')
+        self.assertIsNone(result['availability_request'])
+
+    @patch('extractor._get_client')
+    def test_events_and_availability_can_coexist(self, mock_get_client):
+        """An email can both schedule an event and ask 'when are you free?'."""
+        mock_get_client.return_value = _patch_claude({
+            'events': [{'title': 'Dinner', 'date': '2026-07-10', 'time': '19:00',
+                        'confidence': 'high'}],
+            'availability_request': {'activity': 'play tennis',
+                                     'duration_minutes': 60, 'confidence': 'high'},
+        })
+        result = extractor.extract_event(subject='x', body='y')
+        self.assertEqual(len(result['events']), 1)
+        self.assertEqual(result['availability_request']['activity'], 'play tennis')
+
+    @patch('extractor._get_client')
     def test_sender_included_in_prompt(self, mock_get_client):
         mock_client = _patch_claude({'events': []})
         mock_get_client.return_value = mock_client

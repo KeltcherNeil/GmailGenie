@@ -1,0 +1,9 @@
+{
+  "events": [],
+  "availability_request": {
+    "activity": "play tennis",
+    "duration_minutes": 90,
+    "requester_name": "Sam",
+    "confidence": "high"
+  }
+}

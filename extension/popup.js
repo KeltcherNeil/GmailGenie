@@ -10,7 +10,7 @@ const settingsBtn    = document.getElementById('settings-btn');
 
 async function init() {
   const data = await chrome.storage.local.get([
-    'status', 'events', 'error', 'emailData', 'notificationMode'
+    'status', 'events', 'availability', 'error', 'emailData', 'notificationMode'
   ]);
   currentState = data;
   render(data);
@@ -38,12 +38,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Routing ─────────────────────────────────────────────────────────────────
 
 function render(data) {
-  const { status, events, error } = data;
+  const { status, events, availability, error } = data;
 
   switch (status) {
     case 'processing': renderProcessing(); break;
     case 'done':
-      (events && events.length) ? renderEvents(events) : renderNoEvent('done');
+      if ((events && events.length) || availability) {
+        renderResults(events || [], availability || null);
+      } else {
+        renderNoEvent('done');
+      }
       break;
     case 'auth_required': renderAuthRequired(); break;
     case 'error':   renderError(error);   break;
@@ -55,6 +59,7 @@ function render(data) {
 // ── Views ────────────────────────────────────────────────────────────────────
 
 function renderProcessing() {
+  resetWizard(); // a new email is being scanned — drop any half-finished wizard
   mainContent.innerHTML = `
     <div class="processing-view">
       <div class="spinner"></div>
@@ -73,21 +78,22 @@ const ICON = {
   title: '<svg class="mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg>',
 };
 
-// Render every detected event as a stacked list of editable cards, each with its
-// own "Add to Calendar" button so the user can add any or all of them.
-function renderEvents(events) {
+// Render everything the scan found: the availability wizard (when the email
+// asks "when are you free?") above the stacked list of editable event cards,
+// each with its own "Add to Calendar" button.
+function renderResults(events, availability) {
   const count = events.length;
   const heading = count === 1 ? '1 event detected' : `${count} events detected`;
 
-  const cardsHTML = events.map((event, i) => buildEventCard(event, i)).join('');
-
-  mainContent.innerHTML = `
-    <div class="event-view">
+  const wizardHTML = availability ? buildWizard(availability) : '';
+  const eventsHTML = count ? `
       <div class="events-header">${heading}</div>
-      <div class="events-list">${cardsHTML}</div>
-    </div>
-  `;
+      <div class="events-list">${events.map((event, i) => buildEventCard(event, i)).join('')}</div>
+  ` : '';
 
+  mainContent.innerHTML = `<div class="event-view">${wizardHTML}${eventsHTML}</div>`;
+
+  if (availability) wireWizard(availability);
   events.forEach((event, i) => wireEventCard(event, i));
 }
 
@@ -206,18 +212,256 @@ function wireEventCard(event, i) {
 // Remove one card from the stored list and re-render. When the last card is
 // dismissed, fall back to the empty state.
 async function dismissEvent(i) {
-  const data = await chrome.storage.local.get(['events']);
+  const data = await chrome.storage.local.get(['events', 'availability']);
   const events = Array.isArray(data.events) ? data.events.slice() : [];
   events.splice(i, 1);
 
-  if (events.length) {
+  if (events.length || data.availability) {
     await chrome.storage.local.set({ events });
     currentState.events = events;
-    renderEvents(events);
+    renderResults(events, data.availability || null);
   } else {
     await chrome.storage.local.set({ status: 'idle', events: null });
     renderIdle();
   }
+}
+
+// ── Availability wizard ──────────────────────────────────────────────────────
+// Shown when the email asks the READER for a time ("when can you play
+// tennis?"). Three steps, all driven by the user's real calendar so a booked
+// day/part-of-day is never offered:
+//   1. pick a day  (next 3 days with free time — fully booked days not shown)
+//   2. pick a part of day (morning / midday / evening; booked ones disabled)
+//   3. recommendation — exact slot + drafted reply. "Add to Calendar" creates
+//      the event; "Reply in Gmail" opens a prefilled compose (user hits Send).
+//
+// Wizard state lives here (not in chrome.storage) so storage-driven re-renders
+// don't lose the user's place. It resets when a new email is scanned.
+
+let wiz = { step: 'intro' };
+
+function resetWizard() {
+  wiz = { step: 'intro' };
+}
+
+const BUCKET_META = {
+  morning: { label: 'Morning', hours: '8–12',  icon: '&#127749;' },
+  midday:  { label: 'Midday',  hours: '12–5',  icon: '&#9728;&#65039;' },
+  evening: { label: 'Evening', hours: '5–9',   icon: '&#127769;' },
+};
+
+function activityLabel(availability) {
+  return availability.activity || 'meet up';
+}
+
+// "play tennis" (+ requester) → calendar event title "Play tennis with Sam".
+function wizardEventTitle(availability) {
+  const activity = activityLabel(availability);
+  const title = activity.charAt(0).toUpperCase() + activity.slice(1);
+  return availability.requester_name ? `${title} with ${availability.requester_name}` : title;
+}
+
+function buildWizard(availability) {
+  const who = availability.requester_name || 'The sender';
+  let body;
+
+  switch (wiz.step) {
+    case 'loading':
+      body = `
+        <div class="wiz-loading"><div class="spinner spinner-sm"></div><span>${esc(wiz.loadingText || 'Working…')}</span></div>
+      `;
+      break;
+
+    case 'day': {
+      const chips = wiz.days.map((d, i) =>
+        `<button class="chip" data-day="${i}">${esc(d.label)}</button>`).join('');
+      body = `
+        <p class="wiz-question">Which day works for you?</p>
+        <div class="chip-col">${chips}</div>
+        <p class="wiz-hint">Only days with free time on your calendar are shown.</p>
+      `;
+      break;
+    }
+
+    case 'bucket': {
+      const day = wiz.days[wiz.dayIdx];
+      const chips = Object.keys(BUCKET_META).map((key) => {
+        const meta = BUCKET_META[key];
+        const free = day.buckets[key];
+        return `<button class="chip chip-bucket" data-bucket="${key}" ${free ? '' : 'disabled'}>
+                  <span>${meta.icon} ${meta.label} <span class="chip-sub">${meta.hours}</span></span>
+                  ${free ? '' : '<span class="chip-booked">Booked</span>'}
+                </button>`;
+      }).join('');
+      body = `
+        <p class="wiz-question">What time of day on ${esc(day.label)}?</p>
+        <div class="chip-col">${chips}</div>
+        <button class="wiz-back" data-back="day">&#8592; Different day</button>
+      `;
+      break;
+    }
+
+    case 'rec': {
+      const rec = wiz.rec;
+      const when = `${formatDate(rec.date)} · ${formatTime(rec.start_time)}–${formatTime(rec.end_time)}`;
+      body = `
+        <div class="wiz-rec">
+          <div class="wiz-rec-when">${ICON.clock} ${esc(when)}</div>
+          <div class="wiz-rec-title">${esc(wizardEventTitle(wiz.availability))}</div>
+        </div>
+        <label class="field">
+          <span class="field-label">${ICON.description} Reply draft</span>
+          <textarea id="wiz-reply" class="field-input" rows="5">${esc(rec.reply_body)}</textarea>
+        </label>
+        <button id="wiz-add-cal" class="btn cal full-width">${ICON.calendar} Add to Calendar</button>
+        <button id="wiz-reply-btn" class="btn secondary full-width wiz-reply-btn">&#9993;&#65039; Reply in Gmail</button>
+        <button class="wiz-back" data-back="bucket">&#8592; Different time</button>
+      `;
+      break;
+    }
+
+    case 'error':
+      body = `
+        <p class="wiz-error">${esc(wiz.error)}</p>
+        <button class="wiz-back" data-back="intro">&#8592; Start over</button>
+      `;
+      break;
+
+    case 'nodays':
+      body = `
+        <p class="wiz-error">Your calendar looks fully booked for the next two weeks — no free times to suggest.</p>
+      `;
+      break;
+
+    case 'intro':
+    default:
+      body = `
+        <p class="wiz-text"><b>${esc(who)}</b> asked when you can <b>${esc(activityLabel(availability))}</b>.</p>
+        <button id="wiz-start" class="btn primary full-width">&#128197; Find a time</button>
+        <p class="wiz-hint">GmailGenie checks your calendar and only suggests times you're actually free.</p>
+      `;
+  }
+
+  return `
+    <section class="wiz-block">
+      <div class="events-header">Availability request</div>
+      ${body}
+    </section>
+  `;
+}
+
+function rerenderWizard() {
+  renderResults(currentState.events || [], currentState.availability || null);
+}
+
+function wizardFail(msg) {
+  wiz.step = 'error';
+  wiz.error = msg || 'Something went wrong. Please try again.';
+  rerenderWizard();
+}
+
+function wireWizard(availability) {
+  wiz.availability = availability;
+  const block = mainContent.querySelector('.wiz-block');
+  if (!block) return;
+
+  // Step 0 → fetch day options (reads the calendar; may show Google consent once).
+  block.querySelector('#wiz-start')?.addEventListener('click', async () => {
+    wiz.step = 'loading';
+    wiz.loadingText = 'Checking your calendar…';
+    rerenderWizard();
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({
+        type: 'AVAILABILITY_OPTIONS',
+        durationMinutes: availability.duration_minutes || 60,
+      });
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    if (!result || !result.ok) return wizardFail(result && result.error);
+    if (!result.days.length) { wiz.step = 'nodays'; return rerenderWizard(); }
+    wiz.days = result.days;
+    wiz.busy = result.busy;
+    wiz.step = 'day';
+    rerenderWizard();
+  });
+
+  // Step 1 → day chosen.
+  block.querySelectorAll('.chip[data-day]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      wiz.dayIdx = Number(chip.dataset.day);
+      wiz.step = 'bucket';
+      rerenderWizard();
+    });
+  });
+
+  // Step 2 → part of day chosen → fetch the recommendation + reply draft.
+  block.querySelectorAll('.chip[data-bucket]').forEach((chip) => {
+    chip.addEventListener('click', async () => {
+      wiz.bucket = chip.dataset.bucket;
+      wiz.step = 'loading';
+      wiz.loadingText = 'Picking a time and drafting your reply…';
+      rerenderWizard();
+      let result;
+      try {
+        result = await chrome.runtime.sendMessage({
+          type: 'AVAILABILITY_RECOMMEND',
+          payload: {
+            busy: wiz.busy,
+            date: wiz.days[wiz.dayIdx].date,
+            bucket: wiz.bucket,
+            duration_minutes: availability.duration_minutes || 60,
+            activity: activityLabel(availability),
+            requester_name: availability.requester_name || '',
+            sender: currentState.emailData?.sender || '',
+            subject: currentState.emailData?.subject || '',
+          },
+        });
+      } catch (err) {
+        result = { ok: false, error: err.message };
+      }
+      if (!result || !result.ok) return wizardFail(result && result.error);
+      wiz.rec = result;
+      wiz.step = 'rec';
+      rerenderWizard();
+    });
+  });
+
+  // Step 3 → create the calendar event for the recommended slot.
+  block.querySelector('#wiz-add-cal')?.addEventListener('click', () => {
+    const rec = wiz.rec;
+    createEvent({
+      title: wizardEventTitle(availability),
+      date: rec.date,
+      time: rec.start_time,
+      duration_minutes: rec.duration_minutes,
+      location: null,
+      description: null,
+    }, block.querySelector('#wiz-add-cal'));
+  });
+
+  // Step 3 → open a prefilled Gmail compose with the (possibly edited) draft.
+  // Nothing is sent until the user hits Send themselves.
+  block.querySelector('#wiz-reply-btn')?.addEventListener('click', () => {
+    const rec = wiz.rec;
+    const body = block.querySelector('#wiz-reply')?.value || rec.reply_body;
+    const params = new URLSearchParams({
+      view: 'cm', fs: '1',
+      to: currentState.emailData?.sender || '',
+      su: rec.reply_subject,
+      body,
+    });
+    chrome.tabs.create({ url: `https://mail.google.com/mail/?${params}` });
+  });
+
+  // Back links.
+  block.querySelectorAll('.wiz-back').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      wiz.step = btn.dataset.back;
+      rerenderWizard();
+    });
+  });
 }
 
 function valueOf(id) {
@@ -303,6 +547,7 @@ function renderAuthRequired() {
 }
 
 function renderIdle() {
+  resetWizard();
   mainContent.innerHTML = `
     <div class="empty-view">
       <div class="empty-icon">&#128140;</div>

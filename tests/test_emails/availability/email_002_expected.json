@@ -1,0 +1,20 @@
+{
+  "events": [
+    {
+      "title": "Book club",
+      "date": "<this Thursday resolved against today>",
+      "time": "19:00",
+      "duration_minutes": null,
+      "attendees": ["maria.chen@example.com"],
+      "location": "Maria's place",
+      "description": "Book club meeting",
+      "confidence": "high"
+    }
+  ],
+  "availability_request": {
+    "activity": "grab lunch",
+    "duration_minutes": 60,
+    "requester_name": "Maria",
+    "confidence": "high"
+  }
+}

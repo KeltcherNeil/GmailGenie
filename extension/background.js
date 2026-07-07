@@ -70,22 +70,27 @@ async function extractEvent(emailData, token) {
     throw new Error(data.error || `Extraction failed (${res.status})`);
   }
 
-  return normalizeEvents(data);
+  return normalizeExtraction(data);
 }
 
-// The backend returns { events: [ {…}, … ] }. Older builds returned a single
-// { event_found, title, … } object. Coerce either into a plain array of event
-// objects so the rest of the extension only deals with one shape.
-function normalizeEvents(data) {
+// The backend returns { events: [ {…}, … ], availability_request: {…}|null }.
+// Older builds returned a single { event_found, title, … } object. Coerce any
+// of these into { events, availability } so the rest of the extension only
+// deals with one shape.
+function normalizeExtraction(data) {
+  let events = [];
   if (Array.isArray(data?.events)) {
-    return data.events.filter((e) => e && typeof e === 'object');
-  }
-  // Legacy single-event shape.
-  if (data && data.event_found) {
+    events = data.events.filter((e) => e && typeof e === 'object');
+  } else if (data && data.event_found) {
+    // Legacy single-event shape.
     const { event_found, ...event } = data;
-    return [event];
+    events = [event];
   }
-  return [];
+
+  const ar = data?.availability_request;
+  const availability = (ar && typeof ar === 'object' && ar.activity) ? ar : null;
+
+  return { events, availability };
 }
 
 async function handleEmailOpened(emailData) {
@@ -97,6 +102,7 @@ async function handleEmailOpened(emailData) {
     status: 'processing',
     emailData,
     events: null,
+    availability: null,
     error: null
   });
 
@@ -105,13 +111,13 @@ async function handleEmailOpened(emailData) {
     // not, we still call the backend: in dev (auth disabled) it works tokenless;
     // in prod it returns 401, which we surface as an "auth_required" state below.
     const token = await getAuthTokenSilent();
-    const events = await extractEvent(emailData, token);
+    const { events, availability } = await extractEvent(emailData, token);
 
     if (currentJobId === jobId) {
-      await chrome.storage.local.set({ status: 'done', events, error: null });
+      await chrome.storage.local.set({ status: 'done', events, availability, error: null });
 
-      // Badge mode — put a green dot on the icon to signal event(s) were found
-      if (events.length) {
+      // Badge mode — put a green dot on the icon to signal something was found
+      if (events.length || availability) {
         const { notificationMode = 'none' } = await chrome.storage.local.get('notificationMode');
         if (notificationMode === 'badge') {
           chrome.action.setBadgeText({ text: events.length > 1 ? String(events.length) : '!' });
@@ -122,9 +128,9 @@ async function handleEmailOpened(emailData) {
   } catch (err) {
     if (currentJobId === jobId) {
       if (err.code === 'AUTH_REQUIRED') {
-        await chrome.storage.local.set({ status: 'auth_required', error: null, events: null });
+        await chrome.storage.local.set({ status: 'auth_required', error: null, events: null, availability: null });
       } else {
-        await chrome.storage.local.set({ status: 'error', error: err.message, events: null });
+        await chrome.storage.local.set({ status: 'error', error: err.message, events: null, availability: null });
       }
     }
   }
@@ -145,6 +151,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // User clicked "Connect Google" in the popup. Interactive sign-in, then
     // re-run extraction on the last email with the freshly cached token.
     connectGoogleAndRescan()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  } else if (message.type === 'AVAILABILITY_OPTIONS') {
+    // Availability wizard step 1: read the user's calendar (client-side),
+    // send anonymous busy blocks to the backend, get back candidate days.
+    availabilityOptions(message.durationMinutes)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  } else if (message.type === 'AVAILABILITY_RECOMMEND') {
+    // Availability wizard step 3: exact slot + drafted reply for the chosen
+    // day/bucket. Reuses the busy blocks fetched for the options step.
+    availabilityRecommend(message.payload)
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
@@ -333,4 +353,129 @@ async function createCalendarEvent(event) {
     console.log('[GmailGenie] event creation request failed:', err.message);
     return { ok: false, error: `Could not reach Google Calendar: ${err.message}` };
   }
+}
+
+// ── Availability wizard ("when can you play tennis?") ────────────────────────
+// The user's calendar is read HERE, client-side, with the same calendar.events
+// scope used for event creation (it also permits reading events — no new OAuth
+// scope). Only anonymous busy blocks — local start/end stamps, no titles — are
+// sent to the backend, which computes free days/buckets deterministically
+// (backend/availability.py) and has Claude draft the reply email.
+
+// How far ahead to read the calendar. Comfortably covers the options scan
+// window (backend SCAN_LIMIT_DAYS = 14).
+const BUSY_LOOKAHEAD_DAYS = 15;
+
+// A Date → the user's LOCAL wall-clock stamp "YYYY-MM-DDTHH:MM" (no timezone).
+// All availability math happens in this format so the backend stays tz-free.
+function toLocalStamp(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+         `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// GET the user's upcoming events and reduce them to busy blocks. Skips
+// cancelled events, events marked "Free" (transparent), invitations the user
+// declined, and all-day events (which Google defaults to "Free" anyway).
+async function fetchBusyBlocks(token) {
+  const now = new Date();
+  const params = new URLSearchParams({
+    timeMin: now.toISOString(),
+    timeMax: new Date(now.getTime() + BUSY_LOOKAHEAD_DAYS * 864e5).toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '250',
+  });
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  if (!res.ok) {
+    const err = new Error(`Could not read your calendar (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const data = await res.json();
+  const busy = [];
+  for (const ev of data.items || []) {
+    if (ev.status === 'cancelled') continue;
+    if (ev.transparency === 'transparent') continue;            // marked "Free"
+    if (!ev.start?.dateTime || !ev.end?.dateTime) continue;     // all-day
+    const self = (ev.attendees || []).find((a) => a.self);
+    if (self && self.responseStatus === 'declined') continue;
+    busy.push({
+      start: toLocalStamp(new Date(ev.start.dateTime)),
+      end:   toLocalStamp(new Date(ev.end.dateTime)),
+    });
+  }
+  return busy;
+}
+
+// fetchBusyBlocks with the same stale-token retry used for event creation.
+async function fetchBusyBlocksFresh(token) {
+  try {
+    return await fetchBusyBlocks(token);
+  } catch (err) {
+    if (err.status !== 401) throw err;
+    await removeCachedToken(token);
+    return fetchBusyBlocks(await getAuthToken(true));
+  }
+}
+
+// POST a JSON payload to a backend route, mapping errors the same way the
+// extraction call does (401 → connect prompt, 429 → rate limit).
+async function backendPost(path, payload, token) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let res;
+  try {
+    res = await fetch(`${BACKEND_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw new Error('Could not reach the GmailGenie service. Please try again later.');
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) {
+      const err = new Error('Google sign-in required');
+      err.code = 'AUTH_REQUIRED';
+      throw err;
+    }
+    if (res.status === 429) {
+      throw new Error('Rate limit reached — please wait a moment and try again.');
+    }
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+// Wizard step 1 — candidate days. Interactive auth is fine here: the user just
+// clicked "Find a time", so a consent popup (first run only) is expected.
+async function availabilityOptions(durationMinutes) {
+  const token = await getAuthToken(true);
+  const busy = await fetchBusyBlocksFresh(token);
+  const data = await backendPost('/availability/options', {
+    busy,
+    now: toLocalStamp(new Date()),
+    duration_minutes: durationMinutes || 60,
+  }, token);
+  // Return the busy blocks too — the popup passes them back on the recommend
+  // step so the calendar isn't re-fetched (and options/recommend stay consistent).
+  return { ok: true, days: data.days || [], busy };
+}
+
+// Wizard step 3 — exact slot + drafted reply for the chosen day/bucket.
+async function availabilityRecommend(payload) {
+  const token = await getAuthToken(true);
+  const data = await backendPost('/availability/recommend', {
+    ...payload,
+    now: toLocalStamp(new Date()),
+  }, token);
+  return { ok: true, ...data };
 }

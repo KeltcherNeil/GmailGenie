@@ -93,6 +93,9 @@ Python Backend (app.py)
 - Always clean email text before sending to the AI (remove quoted replies, signatures)
 - The AI always returns JSON. A single email can contain **zero, one, or several**
   events, so the response is always an `events` array — an empty array means none.
+- The extractor also detects **availability requests** — emails asking the READER
+  for a time ("when can you play tennis?"). These are reported in a separate
+  `availability_request` field (`null` when absent), never as an event.
 - Never hardcode API keys — always use environment variables via `python-dotenv`
 - All responses from the backend follow this structure:
 
@@ -109,9 +112,17 @@ Python Backend (app.py)
       "description": "one-sentence summary or null",
       "confidence": "high"
     }
-  ]
+  ],
+  "availability_request": {
+    "activity": "play tennis",
+    "duration_minutes": 60,
+    "requester_name": "Sam",
+    "confidence": "high"
+  }
 }
 ```
+
+(`availability_request` is `null` unless the email asks the reader for a time.)
 
 - `extractor._normalize()` coerces older single-event shapes (`{"event_found": …}`)
   into the `events` array, and `background.js`'s `normalizeEvents()` does the same on
@@ -340,8 +351,13 @@ is effectively free until real scale.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/extract-event` | Takes email text, returns extracted event JSON |
+| POST | `/extract-event` | Takes email text, returns extracted events + `availability_request` |
+| POST | `/availability/options` | Takes busy blocks + local now, returns free days/buckets (no AI call) |
+| POST | `/availability/recommend` | Takes busy blocks + chosen day/bucket, returns exact slot + drafted reply |
 | GET | `/health` | Health check — returns 200 if server is running |
+
+All POST routes share the same guard stack (origin allowlist → per-user Google
+auth → rate limit) via `_request_gate()` in `app.py`.
 
 **Note:** calendar creation is **not** a backend endpoint. It runs entirely in the Chrome
 extension via `chrome.identity` + the Google Calendar API (see the "New behaviour" section under
@@ -355,6 +371,11 @@ Problems). The backend never touches Google Calendar.
 ```bash
 cd tests
 python test_extractor.py
+```
+
+**Run availability-wizard tests** (slot math + routes; no API key needed):
+```bash
+python tests/test_availability.py
 ```
 
 **Run full evaluation on test email dataset:**
@@ -440,9 +461,53 @@ the Anthropic key, which is held in Secret Manager (never committed).
 
 ---
 
+## Availability wizard ("when can you play tennis?")
+
+When an email asks the READER for a time instead of proposing one, the popup
+walks the user through a 3-step wizard driven by their real calendar, so a
+booked day or part of day is **never offered**:
+
+1. **Pick a day** — the next 3 days (starting tomorrow) that have free time;
+   fully-booked days are simply not shown (scan window: 14 days).
+2. **Pick a part of day** — Morning 8–12 / Midday 12–5 / Evening 5–9; booked
+   buckets are disabled with a "Booked" tag.
+3. **Recommendation** — the earliest free slot (30-min grid) in that bucket,
+   plus a Claude-drafted reply. Buttons: **Add to Calendar** (existing
+   `CREATE_EVENT` path) and **Reply in Gmail** (opens a prefilled compose
+   window — GmailGenie never sends email itself).
+
+**Where the pieces live:**
+
+- `backend/extractor.py` — the extraction prompt also returns `availability_request`
+- `backend/availability.py` — ALL slot math: deterministic, tz-free, unit-tested
+  in `tests/test_availability.py`. The "never recommend a busy time" guarantee
+  lives here, not in a prompt.
+- `backend/composer.py` — Claude drafts the reply for the already-picked slot;
+  falls back to a plain template if the API call fails.
+- `extension/background.js` — reads the calendar client-side (`fetchBusyBlocks`),
+  handles `AVAILABILITY_OPTIONS` / `AVAILABILITY_RECOMMEND` messages.
+- `extension/popup.js` — the wizard UI (`buildWizard`/`wireWizard`); state lives
+  in the module-level `wiz`, reset whenever a new email is scanned.
+- `extension/content.js` — compact floating card ("Pick a time") in card mode.
+
+**Key design decisions:**
+
+- **No new OAuth scope.** Calendar reading uses the existing `calendar.events`
+  scope (it permits reading events too). Do NOT add `calendar.readonly` —
+  adding a scope would restart the in-progress OAuth verification.
+- **Privacy:** the calendar is read entirely client-side; only anonymous busy
+  blocks (start/end stamps, no titles/attendees) are sent to the backend.
+- **Timezone-free backend:** the extension converts everything to the user's
+  local wall-clock (`YYYY-MM-DDTHH:MM` naive stamps) before sending, so
+  `availability.py` does plain datetime math.
+- Events marked "Free" (transparent), declined invitations, and all-day events
+  do not count as busy.
+
+---
+
 ## Future Improvements (not yet built)
 
-- Availability detection: read existing calendar events and suggest free slots when someone asks "when are you free?"
+- ~~Availability detection: read existing calendar events and suggest free slots when someone asks "when are you free?"~~ ✅ done (see "Availability wizard")
 - ~~Multi-event extraction: handle emails containing more than one proposed meeting time~~ ✅ done
 - Confidence scoring: only show the popup when extraction confidence is above a threshold
 - Hosted backend: deploy Flask app to Railway or Render so others can install the extension
