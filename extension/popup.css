@@ -103,8 +103,8 @@ header::after {
 
 /* ── Main content area ───────────────────────── */
 main {
-  padding: 12px 16px;
-  min-height: 120px;
+  padding: 10px 14px;
+  min-height: 110px;
 }
 
 /* ── Setup / no API key ──────────────────────── */
@@ -154,13 +154,13 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--ink-soft);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .events-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 /* Divider between stacked event cards (not before the first). */
@@ -179,7 +179,7 @@ main {
 
 /* ── Confidence bar ──────────────────────────── */
 .confidence {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   animation: conf-in 0.45s ease both;
 }
 
@@ -192,7 +192,7 @@ main {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .confidence-label {
@@ -211,7 +211,7 @@ main {
 }
 
 .confidence-track {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: #eceef4;
   overflow: hidden;
@@ -233,11 +233,11 @@ main {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 13px;
+  padding: 11px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.22s ease, transform 0.22s ease;
 }
@@ -246,7 +246,7 @@ main {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .field-label {
@@ -269,7 +269,7 @@ main {
 
 .field-input {
   width: 100%;
-  padding: 9px 11px;
+  padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   font-size: 13.5px;
@@ -286,19 +286,19 @@ main {
 }
 .field-input::placeholder { color: var(--ink-faint); }
 
-textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
+textarea.field-input { resize: vertical; min-height: 32px; line-height: 1.4; }
 
 /* Date & time are the visual anchor */
-.field-row { display: flex; gap: 12px; }
+.field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
-.field.emph .field-input { font-size: 15px; font-weight: 600; padding: 10px 12px; }
+.field.emph .field-input { font-size: 14.5px; font-weight: 600; padding: 8px 11px; }
 
 .end-hint {
-  margin-top: -6px;
+  margin-top: -4px;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--accent-2);
-  min-height: 14px;
+  min-height: 13px;
   padding-left: 2px;
 }
 
@@ -353,7 +353,7 @@ textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 11px 18px;
+  padding: 9px 18px;
   border-radius: 11px;
   border: none;
   cursor: pointer;
@@ -434,7 +434,7 @@ textarea.field-input { resize: vertical; min-height: 40px; line-height: 1.45; }
   color: var(--ink-faint);
   cursor: pointer;
   font-size: 12px;
-  padding: 12px 0 2px;
+  padding: 8px 0 2px;
   display: block;
   text-align: center;
   width: 100%;
