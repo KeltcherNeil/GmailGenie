@@ -15,7 +15,7 @@
     "https://www.googleapis.com/calendar/v3/*"
   ],
   "oauth2": {
-    "client_id": "262145028639-cc2t5r3e8374b9ginju3psgroq2ns0bt.apps.googleusercontent.com",
+    "client_id": "485353812643-d4sfmug4qjl03sk13dljbhkq0sojk4vf.apps.googleusercontent.com",
     "scopes": [
       "openid",
       "email",
