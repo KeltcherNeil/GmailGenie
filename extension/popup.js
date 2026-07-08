@@ -10,7 +10,8 @@ const settingsBtn    = document.getElementById('settings-btn');
 
 async function init() {
   const data = await chrome.storage.local.get([
-    'status', 'events', 'availability', 'error', 'emailData', 'notificationMode'
+    'status', 'events', 'availability', 'error', 'emailData', 'notificationMode',
+    'processingStartedAt'
   ]);
   currentState = data;
   render(data);
@@ -58,14 +59,55 @@ function render(data) {
 
 // ── Views ────────────────────────────────────────────────────────────────────
 
+// A "processing" state older than this is a dead job: the service worker was
+// killed mid-extraction (extension reloaded / files changed on disk) and left
+// storage frozen. The popup must recover on its own — nothing else will.
+const PROCESSING_STALL_MS = 15000;
+
+let stallTimer = null;
+
 function renderProcessing() {
   resetWizard(); // a new email is being scanned — drop any half-finished wizard
+
+  // If this job already stalled (popup opened long after the worker died),
+  // don't show a hopeless spinner — retry immediately with the stored email.
+  const startedAt = currentState.processingStartedAt;
+  const age = startedAt ? Date.now() - startedAt : 0;
+  if (age > PROCESSING_STALL_MS && currentState.emailData) {
+    retryExtraction();
+    // fall through and render the spinner while the retried job runs
+  }
+
   mainContent.innerHTML = `
     <div class="processing-view">
       <div class="spinner"></div>
       <p>Analyzing email for scheduling info…</p>
+      <button id="stall-rescan-btn" class="btn secondary hidden">&#8635; Taking too long — rescan</button>
+      <p id="stall-hint" class="sub hidden">If you just reloaded the extension, also refresh the Gmail tab.</p>
     </div>
   `;
+
+  // Reveal a manual escape hatch if this job is still running when it hits
+  // the stall threshold (re-rendering resets the timer, so a fresh job that
+  // replaces this one starts its own countdown).
+  clearTimeout(stallTimer);
+  const wait = Math.max(1000, PROCESSING_STALL_MS - age);
+  stallTimer = setTimeout(() => {
+    document.getElementById('stall-rescan-btn')?.classList.remove('hidden');
+    document.getElementById('stall-hint')?.classList.remove('hidden');
+    document.getElementById('stall-rescan-btn')?.addEventListener('click', retryExtraction);
+  }, wait);
+}
+
+// Re-run extraction on the email stored by the last scan. Talks straight to
+// the service worker, so it works even when the Gmail tab's content script is
+// dead (the usual cause of a stuck spinner).
+function retryExtraction() {
+  if (currentState.emailData) {
+    chrome.runtime.sendMessage({ type: 'EMAIL_OPENED', payload: currentState.emailData });
+  } else {
+    renderIdle(); // nothing stored to retry — offer the manual scan button
+  }
 }
 
 // Inline Material Symbols (as SVG) so icons match Gmail/Calendar and need no

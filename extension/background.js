@@ -97,9 +97,12 @@ async function handleEmailOpened(emailData) {
   const jobId = Date.now().toString();
   currentJobId = jobId;
 
-  // Immediately signal that we're working
+  // Immediately signal that we're working. processingStartedAt lets the popup
+  // detect a job that died mid-flight (e.g. the extension was reloaded while
+  // extracting, killing the worker) and recover instead of spinning forever.
   await chrome.storage.local.set({
     status: 'processing',
+    processingStartedAt: Date.now(),
     emailData,
     events: null,
     availability: null,
