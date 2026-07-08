@@ -472,17 +472,78 @@ function showAvailabilityCard(availability) {
   });
 }
 
+// Compact card for FREE users in card mode: auto-scan is a premium perk, so
+// offer a one-click manual scan instead of silently doing nothing. No AI call
+// (and no quota) is spent until the user clicks Scan.
+function showScanOfferCard(billing) {
+  removeCard();
+  const left = Math.max(0, (billing?.limit || 0) - (billing?.used || 0));
+  const card = document.createElement('div');
+  card.id = CARD_ID;
+  card.innerHTML = `
+    <style>
+      #gmailgenie-floating-card {
+        position: fixed; bottom: 24px; right: 24px; width: 280px;
+        background: #fff; border-radius: 14px;
+        box-shadow: 0 10px 32px rgba(24,28,40,0.20);
+        font-family: 'Google Sans', Roboto, -apple-system, Arial, sans-serif;
+        font-size: 13px; color: #1f2430;
+        z-index: 2147483647; border: 1px solid #eef0f4; overflow: hidden;
+        animation: gg-in 0.28s cubic-bezier(0.22,1,0.36,1);
+      }
+      @keyframes gg-in {
+        from { transform: translateY(16px); opacity: 0; }
+        to   { transform: translateY(0);    opacity: 1; }
+      }
+      #gmailgenie-floating-card .gg-row2 {
+        display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      }
+      #gmailgenie-floating-card .gg-txt { flex: 1; line-height: 1.35; color: #4b5160; }
+      #gmailgenie-floating-card .gg-sub { font-size: 11px; color: #9aa2b1; margin-top: 2px; }
+      #gmailgenie-floating-card .gg-scan {
+        background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+        color: #fff; border: none; border-radius: 9px; padding: 9px 14px;
+        font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+        flex-shrink: 0;
+      }
+      #gmailgenie-floating-card .gg-x2 {
+        background: none; border: none; color: #9aa2b1; cursor: pointer;
+        font-size: 13px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+      }
+    </style>
+    <div class="gg-row2">
+      <button class="gg-x2" id="gg-close">&#10005;</button>
+      <div class="gg-txt">Scan this email for scheduling info?
+        <div class="gg-sub">${left} of ${billing?.limit ?? 10} free scans left this week</div>
+      </div>
+      <button class="gg-scan" id="gg-scan-now">Scan</button>
+    </div>
+  `;
+  document.body.appendChild(card);
+  document.getElementById('gg-close').addEventListener('click', removeCard);
+  document.getElementById('gg-scan-now').addEventListener('click', () => {
+    safeSendMessage({ type: 'FORCE_SCAN' });
+    removeCard(); // results (if any) arrive as the normal event card
+  });
+}
+
 // Watch storage — show or remove card based on current mode
 chrome.storage.onChanged.addListener((_, area) => {
   if (area !== 'local') return;
-  chrome.storage.local.get(['status', 'events', 'availability', 'notificationMode', 'availabilityEnabled'], (data) => {
-    if (data.status === 'done' && data.notificationMode === 'card') {
+  chrome.storage.local.get(['status', 'events', 'availability', 'notificationMode', 'availabilityEnabled', 'billing'], (data) => {
+    if (data.notificationMode !== 'card') {
+      if (data.status === 'idle') removeCard();
+      return;
+    }
+    if (data.status === 'done') {
       if (data.events?.length) {
         showEventCard(data.events);          // events card wins when both exist
       } else if (data.availability && data.availabilityEnabled !== false) {
         // Availability scheduler can be switched off in Settings.
         showAvailabilityCard(data.availability);
       }
+    } else if (data.status === 'scan_ready') {
+      showScanOfferCard(data.billing);       // free tier: offer a manual scan
     } else if (data.status === 'idle') {
       removeCard();
     }
