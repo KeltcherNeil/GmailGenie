@@ -262,13 +262,22 @@ class TestSlotChips(unittest.TestCase):
     """The time-picker step: options list every free start; slot_at honours
     the user's exact pick."""
 
-    def test_options_include_free_slots_per_bucket(self):
+    def test_options_include_full_grid_with_free_flags(self):
+        # Busy 9:00–10:30 → the WHOLE morning grid is returned (7 slots for a
+        # 60-min duration), with the conflicting ones flagged free=False.
         days = option_days([block(WED, '09:00', '10:30')])
         wed = next(d for d in days if d['date'] == WED)
-        self.assertEqual(wed['slots']['morning'], ['08:00', '10:30', '11:00'])
-        # Bucket availability and its slot list agree by construction.
-        self.assertEqual(wed['buckets']['morning'], bool(wed['slots']['morning']))
-        self.assertEqual(len(wed['slots']['midday']), 9)   # 12:00 … 16:00, free
+        morning = wed['slots']['morning']
+        self.assertEqual([s['time'] for s in morning],
+                         ['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00'])
+        self.assertEqual([s['time'] for s in morning if s['free']],
+                         ['08:00', '10:30', '11:00'])
+        # Bucket availability agrees with its slot flags by construction.
+        self.assertEqual(wed['buckets']['morning'],
+                         any(s['free'] for s in morning))
+        # Fully-free midday: 12:00 … 16:00 all free.
+        self.assertTrue(all(s['free'] for s in wed['slots']['midday']))
+        self.assertEqual(len(wed['slots']['midday']), 9)
 
     def test_slot_at_returns_the_exact_pick(self):
         start, end = slot_at([], FRI, 'midday', '14:30', 60)

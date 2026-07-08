@@ -65,12 +65,13 @@ def _is_free(start: datetime, end: datetime, intervals: list) -> bool:
     return all(end <= b_start or b_end <= start for b_start, b_end in intervals)
 
 
-def slot_starts(intervals: list, day: date, bucket: str,
-                duration_minutes: int, now: datetime = None) -> list:
+def grid_slots(intervals: list, day: date, bucket: str,
+               duration_minutes: int, now: datetime = None) -> list:
     """
-    Every free candidate start (datetime) for a `duration_minutes` slot inside
-    `bucket` on `day`, on the half-hour grid. Empty list = bucket is booked.
-    Slots that start at or before `now` are excluded.
+    EVERY candidate start on the half-hour grid that fits a `duration_minutes`
+    slot inside `bucket` on `day`, as (start, free) pairs — free=False means a
+    calendar conflict (or the slot is already past). The UI shows the whole
+    grid and colours conflicts rather than hiding them.
     """
     if bucket not in BUCKETS:
         raise ValueError(f'Unknown bucket: {bucket!r}')
@@ -80,12 +81,23 @@ def slot_starts(intervals: list, day: date, bucket: str,
     cursor   = datetime.combine(day, open_t)
     close    = datetime.combine(day, close_t)
 
-    starts = []
+    slots = []
     while cursor + duration <= close:
-        if (now is None or cursor > now) and _is_free(cursor, cursor + duration, intervals):
-            starts.append(cursor)
+        free = (now is None or cursor > now) and _is_free(cursor, cursor + duration, intervals)
+        slots.append((cursor, free))
         cursor += timedelta(minutes=STEP_MINUTES)
-    return starts
+    return slots
+
+
+def slot_starts(intervals: list, day: date, bucket: str,
+                duration_minutes: int, now: datetime = None) -> list:
+    """
+    Every FREE candidate start (datetime) for a `duration_minutes` slot inside
+    `bucket` on `day`. Empty list = bucket is booked.
+    """
+    return [start for start, free
+            in grid_slots(intervals, day, bucket, duration_minutes, now=now)
+            if free]
 
 
 def _day_label(day: date) -> str:
@@ -127,14 +139,14 @@ def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
     today     = now_dt.date()
 
     def day_entry(day, preferred):
-        # Every free start time per bucket — the UI shows these as pickable
-        # chips after the user chooses a part of day.
+        # The FULL time grid per bucket, each start flagged free/busy — the UI
+        # shows every slot and colours conflicts rather than hiding them.
         slots = {
-            name: [s.strftime('%H:%M')
-                   for s in slot_starts(intervals, day, name, duration_minutes, now=now_dt)]
+            name: [{'time': s.strftime('%H:%M'), 'free': free}
+                   for s, free in grid_slots(intervals, day, name, duration_minutes, now=now_dt)]
             for name in BUCKET_ORDER
         }
-        buckets = {name: bool(slots[name]) for name in BUCKET_ORDER}
+        buckets = {name: any(s['free'] for s in slots[name]) for name in BUCKET_ORDER}
         if not any(buckets.values()):
             return None  # fully booked
         return {

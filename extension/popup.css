@@ -435,11 +435,46 @@ textarea.field-input { resize: vertical; min-height: 32px; line-height: 1.4; }
   text-align: center;
 }
 
-.chip.chip-suggested {
-  border-color: var(--accent-2);
-  background: linear-gradient(135deg, rgba(106, 17, 203, 0.07), rgba(37, 117, 252, 0.07));
-  color: var(--accent);
+/* Free slot — green, pickable */
+.chip.chip-free {
+  border-color: rgba(18, 183, 106, 0.45);
+  background: rgba(18, 183, 106, 0.08);
+  color: #067647;
 }
+.chip.chip-free:hover {
+  border-color: var(--high);
+  background: rgba(18, 183, 106, 0.14);
+}
+
+/* Conflicting slot — red, disabled, still visible so the day's shape is clear */
+.chip.chip-conflict,
+.chip.chip-conflict:disabled {
+  border-color: rgba(240, 68, 56, 0.35);
+  background: rgba(240, 68, 56, 0.07);
+  color: #b42318;
+  opacity: 0.75;
+  text-decoration: line-through;
+  cursor: default;
+}
+
+/* The suggested free slot — strongest emphasis */
+.chip.chip-suggested {
+  border-color: var(--high);
+  background: rgba(18, 183, 106, 0.16);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(18, 183, 106, 0.35);
+}
+
+/* Legend dots under the grid */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: baseline;
+}
+.dot-free     { background: var(--high); }
+.dot-conflict { background: var(--low); }
 
 /* "They asked" badge — marks the day / time of day the email requested */
 .chip-pref {

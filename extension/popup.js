@@ -387,19 +387,31 @@ function buildWizard(availability) {
     }
 
     case 'time': {
-      // Every free start time in the chosen bucket, as pickable chips. The
-      // suggested one (closest to the asked time, else earliest) is starred.
+      // The bucket's WHOLE time grid: free slots are green and pickable, busy
+      // slots are red and disabled, the suggested free slot (closest to the
+      // asked time, else earliest) is starred.
       const day = wiz.days[wiz.dayIdx];
-      const slots = (day.slots && day.slots[wiz.bucket]) || [];
-      const suggested = suggestedSlot(slots, availability.preferred_time);
-      const chips = slots.map((t) =>
-        `<button class="chip chip-time ${t === suggested ? 'chip-suggested' : ''}" data-time="${t}">
-           ${t === suggested ? '&#9733; ' : ''}${esc(formatTime(t))}
-         </button>`).join('');
+      const slots = ((day.slots && day.slots[wiz.bucket]) || [])
+        // Tolerate an older backend that sent only the free times as strings.
+        .map((s) => (typeof s === 'string' ? { time: s, free: true } : s));
+      const freeTimes = slots.filter((s) => s.free).map((s) => s.time);
+      const suggested = suggestedSlot(freeTimes, availability.preferred_time);
+      const chips = slots.map((s) => {
+        if (!s.free) {
+          return `<button class="chip chip-time chip-conflict" disabled title="You have a conflict">
+                    ${esc(formatTime(s.time))}
+                  </button>`;
+        }
+        return `<button class="chip chip-time chip-free ${s.time === suggested ? 'chip-suggested' : ''}" data-time="${s.time}">
+                  ${s.time === suggested ? '&#9733; ' : ''}${esc(formatTime(s.time))}
+                </button>`;
+      }).join('');
       body = `
         <p class="wiz-question">Pick a time — ${esc(day.label)}, ${esc(BUCKET_META[wiz.bucket].label.toLowerCase())}</p>
         <div class="chip-grid">${chips}</div>
-        <p class="wiz-hint">You're free at every time shown &middot; &#9733; = suggested (closest to what they asked)</p>
+        <p class="wiz-hint"><span class="dot dot-free"></span> free &middot;
+          <span class="dot dot-conflict"></span> conflict &middot;
+          &#9733; = suggested</p>
         <button class="wiz-back" data-back="bucket">&#8592; Different time of day</button>
       `;
       break;
