@@ -10,7 +10,7 @@ OAuth consent-screen verification. Fill the `<…>` placeholders before submitti
 The store wants a ZIP of the extension directory (not the repo root):
 
 ```bash
-cd extension && zip -r ../gmailgenie-1.0.0.zip . -x '.*'
+cd extension && zip -r ../gmailgenie-$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])").zip . -x '.*'
 ```
 
 Bump `version` in `manifest.json` for every new upload (store rejects duplicate
@@ -23,7 +23,7 @@ versions).
 **Name:** GmailGenie
 
 **Short description** (≤132 chars):
-> Turn emails into calendar events. GmailGenie spots meetings and appointments in Gmail and adds them to Google Calendar in one click.
+> Turn emails into calendar events — and when someone asks "when are you free?", get conflict-free times and a ready-to-send reply.
 
 **Category:** Productivity
 
@@ -32,20 +32,38 @@ versions).
 > meetings, appointments, or events it mentions — then lets you add them to Google
 > Calendar with a single click.
 >
+> ADD EVENTS IN ONE CLICK
 > • One click from email to calendar — no copying dates and times by hand.
 > • Handles multiple events in one email (e.g. "this Tuesday at 6:30, next Tuesday at 8").
 > • Edit the title, date, time, and location before you add it.
 > • Events are created directly on your Google Calendar from your browser.
 >
-> GmailGenie only reads the message you have open, never stores your email content,
-> and never sells your data. See our privacy policy for details.
+> ANSWER "WHEN ARE YOU FREE?" IN SECONDS
+> When an email asks for YOUR availability ("when can you play tennis?"),
+> GmailGenie checks your calendar and walks you through picking a time:
+> • Suggests days with free time — fully booked days are never offered.
+> • Shows each day's times color-coded: green you're free, red you have a conflict.
+> • Honors what the email asked for ("Friday around noon") and warns you if
+>   you're busy then, suggesting the closest free time instead.
+> • Drafts a friendly reply proposing the time — you review it in Gmail and
+>   hit Send yourself — and adds the event to your calendar in one click.
+>
+> Your privacy stays intact: GmailGenie only reads the message you have open,
+> reads your calendar only in your browser (only anonymous busy/free times —
+> never event titles or guests — are used to compute suggestions), never stores
+> your email content, and never sells your data. See our privacy policy for details.
 
 **Single-purpose description** (required):
 > GmailGenie detects scheduling information in the Gmail message the user is viewing
-> and creates a corresponding Google Calendar event.
+> and helps the user act on it: creating the corresponding Google Calendar event,
+> or — when the email asks for the user's availability — suggesting conflict-free
+> times from their calendar and drafting a reply for the user to review and send.
 
 **Screenshots to capture** (1280×800 or 640×400): the event card popup on an email;
-a multi-event email showing "2 events detected"; the "Added to Calendar ✓" state.
+a multi-event email showing "2 events detected"; the "Added to Calendar ✓" state;
+the availability wizard's day list ("Which day works for you?" with a THEY ASKED
+badge); the color-coded time grid (green free / red conflict / ★ suggested); the
+recommendation with the drafted reply.
 
 **Privacy policy URL:** `<host PRIVACY.md at a public URL — e.g. GitHub Pages>`
 
@@ -56,11 +74,11 @@ a multi-event email showing "2 events detected"; the "Added to Calendar ✓" sta
 | Item | Justification |
 |---|---|
 | `activeTab` | Send a "scan this email" message to the Gmail tab the user is actively viewing when they open the popup. |
-| `storage` | Save the detected event(s) and the user's notification preference locally so the popup can display them. |
-| `identity` | Google Sign-In so the user can create calendar events and so the backend can confirm a signed-in user (calendar scope). |
+| `storage` | Save the detected event(s), scan state, and the user's preferences (notification mode, availability-scheduler toggle) locally so the popup can display them. |
+| `identity` | Google Sign-In so the user can create calendar events, check their availability, and so the backend can confirm a signed-in user (calendar scope). |
 | host: `mail.google.com` | Read the open email's text to detect scheduling info. |
-| host: `gmailgenie-…run.app` | Send the email text to our extraction backend. |
-| host: `googleapis.com/calendar/v3` | Create the approved event on the user's Google Calendar. |
+| host: `gmailgenie-…run.app` | Send the email text to our extraction backend; send anonymous busy/free intervals (no titles) so it can compute conflict-free time suggestions. |
+| host: `googleapis.com/calendar/v3` | Create the approved event on the user's Google Calendar; read upcoming events' times (in the browser) so the availability feature never suggests a time the user is busy. |
 | Remote code | None. The extension bundles all its JS; nothing is fetched and executed. |
 
 ---
@@ -68,14 +86,18 @@ a multi-event email showing "2 events detected"; the "Added to Calendar ✓" sta
 ## 4. Data-use disclosures (Web Store "Privacy practices" tab)
 
 - **What user data is collected:** "Personal communications" (email content of the
-  open message). No authentication info stored; no location, financial, health,
-  personal identifiers, web history, or activity logging.
-- **Purpose:** App functionality only (detecting events in the email being viewed).
+  open message) and calendar free/busy times (start/end timestamps only — no event
+  titles, descriptions, or attendees). No authentication info stored; no location,
+  financial, health, personal identifiers, web history, or activity logging.
+- **Purpose:** App functionality only (detecting events in the email being viewed;
+  suggesting conflict-free times when the email asks for the user's availability).
 - Certify: **not sold to third parties**, **not used for purposes unrelated to the
   single purpose**, **not used for creditworthiness/lending**.
 - **Data handling:** email text is transmitted to our backend + Anthropic solely to
-  extract event details and is **not retained**. Disclose Anthropic as a service
-  provider.
+  extract event details and draft the user's reply, and is **not retained**.
+  Calendar data is read in the user's browser; only anonymous busy/free intervals
+  are transmitted to our backend to compute time suggestions, and are **not
+  retained**. Disclose Anthropic as a service provider.
 - Link the hosted privacy policy.
 
 ---
@@ -94,11 +116,12 @@ verification.
 | Scope | Why |
 |---|---|
 | `openid`, `email` | Identify the signed-in user so the backend can authorize per-account access and rate-limit (prevents anonymous abuse of the extraction service). |
-| `.../auth/calendar.events` | Create the calendar events the user approves. GmailGenie only creates/edits events the user explicitly adds; it does not read the user's existing calendar. |
+| `.../auth/calendar.events` | (1) Create the calendar events the user explicitly approves. (2) Read the start/end times of the user's upcoming events — in the browser — so that when an email asks for the user's availability, GmailGenie only suggests times the user is actually free. Event titles, descriptions, and attendees are never transmitted or stored; only anonymous busy/free intervals are used to compute suggestions. |
 
 **Verification needs:** a verified app homepage + the hosted privacy-policy URL on the
 same domain, an authorized domain, and (Google may request) a short demo video showing
-the consent flow and how the scope is used.
+the consent flow and how the scope is used — show BOTH uses: creating an event from a
+detected email, and the availability wizard reading free/busy to suggest a time.
 
 ---
 
