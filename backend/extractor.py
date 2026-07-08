@@ -64,6 +64,7 @@ an "availability_request" field next to "events":
     "requester_name": "sender's first name if evident, else null",
     "preferred_dates": ["YYYY-MM-DD", ...],
     "preferred_time_of_day": "morning" | "midday" | "evening" | null,
+    "preferred_time": "HH:MM or null",
     "confidence": "high" | "medium" | "low"
   }
 }
@@ -75,6 +76,10 @@ left open ("this week", "sometime soon").
 preferred_time_of_day: set only when the sender constrained the part of day
 ("Thursday evening" → "evening"; before ~11am → "morning", ~11am-5pm →
 "midday", after 5pm → "evening"), else null.
+preferred_time: set only when the sender named an approximate or exact clock
+time ("around noon" → "12:00", "at 3" → "15:00", "after work" → "17:30"),
+24-hour format; also set preferred_time_of_day to the matching part of day.
+Null when only a day or part of day was mentioned.
 
 Set "availability_request" to null when the email does not ask the reader for
 a time. An email that proposes a SPECIFIC date AND time ("tennis Friday at 3?")

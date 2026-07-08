@@ -94,7 +94,7 @@ def _day_label(day: date) -> str:
 
 
 def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
-                  days_wanted=3, preferred_dates=None) -> dict:
+                  days_wanted=3, preferred_dates=None, preferred_time=None) -> dict:
     """
     The day choices to offer the user, honouring any dates the EMAIL asked for
     ("can you play tennis on Thursday?" → Thursday leads the list, flagged
@@ -109,13 +109,18 @@ def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
         days_wanted:      how many candidate days to return in total.
         preferred_dates:  ["YYYY-MM-DD", ...] the email suggested (may be empty).
                           Malformed, past, or beyond-scan-window dates are ignored.
+        preferred_time:   "HH:MM" the email asked for ("around noon" → "12:00"),
+                          or None. Each offered day is annotated with whether
+                          that time is free on it.
 
     Returns:
         {"days": [{"date": "2026-07-09", "label": "Thursday, Jul 9",
-                   "buckets": {"morning": true, ...}, "preferred": true}, ...],
+                   "buckets": {"morning": true, ...}, "preferred": true,
+                   "asked_time_free": true|false|null}, ...],
          "unavailable_preferred": [{"date": ..., "label": ...}, ...]}
         ("days" holds free preferred dates first, then the next free days
-        starting tomorrow, up to days_wanted; possibly fewer if all booked.)
+        starting tomorrow, up to days_wanted; possibly fewer if all booked.
+        asked_time_free is null when the email named no specific time.)
     """
     intervals = parse_busy(busy)
     now_dt    = _parse_stamp(now)
@@ -133,6 +138,8 @@ def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
             'label': _day_label(day),
             'buckets': buckets,
             'preferred': preferred,
+            'asked_time_free': asked_time_free(
+                busy, day.isoformat(), preferred_time, duration_minutes),
         }
 
     days, unavailable_preferred = [], []
@@ -167,12 +174,43 @@ def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
     return {'days': days[:days_wanted], 'unavailable_preferred': unavailable_preferred}
 
 
-def pick_slot(busy, day_str: str, bucket: str,
-              duration_minutes=DEFAULT_DURATION_MINUTES, now=None):
+def _parse_pref_time(time_str):
+    """'12:00' → time(12, 0), or None when missing/malformed."""
+    try:
+        hour, minute = str(time_str).split(':')
+        return time(int(hour), int(minute))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def asked_time_free(busy, day_str: str, time_str: str,
+                    duration_minutes=DEFAULT_DURATION_MINUTES):
     """
-    The slot to recommend for the chosen day + bucket: the earliest free
-    candidate. Returns (start, end) datetimes, or None when the bucket has no
-    free slot (e.g. the calendar changed since options were computed).
+    Whether the slot the EMAIL asked for ("Friday around noon" → 12:00 on that
+    day) is actually free on the user's calendar. Returns None when there is no
+    parseable asked time — the UI shows a conflict notice only on True/False.
+    """
+    pref = _parse_pref_time(time_str)
+    if pref is None:
+        return None
+    try:
+        day = date.fromisoformat(day_str)
+    except (TypeError, ValueError):
+        return None
+    start = datetime.combine(day, pref)
+    return _is_free(start, start + timedelta(minutes=duration_minutes), parse_busy(busy))
+
+
+def pick_slot(busy, day_str: str, bucket: str,
+              duration_minutes=DEFAULT_DURATION_MINUTES, now=None,
+              preferred_time=None):
+    """
+    The slot to recommend for the chosen day + bucket. With no asked time, the
+    earliest free candidate wins. When the email asked for a specific time
+    ("around noon" → preferred_time="12:00"), the free candidate CLOSEST to it
+    wins instead — so a busy noon yields 1:00 PM, not the bucket's opening
+    slot. Returns (start, end) datetimes, or None when the bucket has no free
+    slot (e.g. the calendar changed since options were computed).
     """
     intervals = parse_busy(busy)
     day       = date.fromisoformat(day_str)
@@ -181,5 +219,12 @@ def pick_slot(busy, day_str: str, bucket: str,
     starts = slot_starts(intervals, day, bucket, duration_minutes, now=now_dt)
     if not starts:
         return None
-    start = starts[0]
+
+    pref = _parse_pref_time(preferred_time)
+    if pref is None:
+        start = starts[0]
+    else:
+        pref_dt = datetime.combine(day, pref)
+        # Closest to the asked time; ties go to the earlier slot.
+        start = min(starts, key=lambda s: (abs(s - pref_dt), s))
     return start, start + timedelta(minutes=duration_minutes)

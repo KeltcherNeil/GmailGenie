@@ -348,8 +348,15 @@ function buildWizard(availability) {
                   ${badge}
                 </button>`;
       }).join('');
+      // The email asked for a specific time and the calendar has a conflict
+      // there — say so up front, before the user even picks a bucket.
+      const conflict = (day.asked_time_free === false && availability.preferred_time)
+        ? `<p class="wiz-notice">&#9888;&#65039; They asked for ${esc(formatTime(availability.preferred_time))},
+             but you have a conflict then — GmailGenie will suggest the closest free time.</p>`
+        : '';
       body = `
         <p class="wiz-question">What time of day on ${esc(day.label)}?</p>
+        ${conflict}
         <div class="chip-col">${chips}</div>
         <button class="wiz-back" data-back="day">&#8592; Different day</button>
       `;
@@ -359,7 +366,13 @@ function buildWizard(availability) {
     case 'rec': {
       const rec = wiz.rec;
       const when = `${formatDate(rec.date)} · ${formatTime(rec.start_time)}–${formatTime(rec.end_time)}`;
+      // The asked-for time was busy → explain why the proposal differs.
+      const shifted = (rec.asked_time_free === false && rec.asked_time)
+        ? `<p class="wiz-notice">&#9888;&#65039; You're busy at ${esc(formatTime(rec.asked_time))},
+             so this is the closest time you're free.</p>`
+        : '';
       body = `
+        ${shifted}
         <div class="wiz-rec">
           <div class="wiz-rec-when">${ICON.clock} ${esc(when)}</div>
           <div class="wiz-rec-title">${esc(wizardEventTitle(wiz.availability))}</div>
@@ -431,6 +444,7 @@ function wireWizard(availability) {
         type: 'AVAILABILITY_OPTIONS',
         durationMinutes: availability.duration_minutes || 60,
         preferredDates: availability.preferred_dates || [],
+        preferredTime: availability.preferred_time || '',
       });
     } catch (err) {
       result = { ok: false, error: err.message };
@@ -473,9 +487,11 @@ function wireWizard(availability) {
             requester_name: availability.requester_name || '',
             sender: currentState.emailData?.sender || '',
             subject: currentState.emailData?.subject || '',
-            // The day(s) the email asked about — lets the drafted reply
-            // acknowledge when the chosen day differs from what they asked.
+            // What the email asked about — lets the recommendation stick
+            // close to the asked time and the drafted reply acknowledge
+            // when the proposal differs from it.
             preferred_dates: availability.preferred_dates || [],
+            preferred_time: availability.preferred_time || '',
           },
         });
       } catch (err) {

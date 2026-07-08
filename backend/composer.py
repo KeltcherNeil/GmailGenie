@@ -36,10 +36,11 @@ Rules:
 - 2-4 sentences, warm and casual, matching how people write to friends.
 - Ask them to confirm the time works (e.g. "does that work for you?").
 - Greet the requester by first name when one is given.
-- When the requester asked about specific day(s) and the proposed time falls on
-  a DIFFERENT day, briefly acknowledge theirs doesn't work ("Thursday's no good
-  for me, but...") before proposing. When it matches what they asked, just
-  confirm naturally ("Thursday works!").
+- When the requester asked about specific day(s) or a specific time and the
+  proposal differs — different day, or a start time off by more than ~30
+  minutes, or they're marked BUSY at the asked time — briefly acknowledge
+  theirs doesn't work ("noon's no good for me, but 1 works") before proposing.
+  When it matches what they asked, just confirm naturally ("noon works!").
 - Do NOT include a signature, sender name, or placeholders like [Your Name].
 - Subject: reply to the original subject ("Re: ...") when one is given,
   otherwise write a short natural subject.\

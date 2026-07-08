@@ -20,7 +20,8 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import availability
-from availability import build_options, parse_busy, pick_slot, slot_starts
+from availability import (asked_time_free, build_options, parse_busy,
+                          pick_slot, slot_starts)
 
 # A fixed "now": Tuesday, July 7, 2026, 9:30 AM. Candidate days start Wednesday.
 NOW = '2026-07-07T09:30'
@@ -208,6 +209,55 @@ class TestPickSlot(unittest.TestCase):
         self.assertEqual(start, datetime(2026, 7, 7, 9, 30))
 
 
+class TestAskedTime(unittest.TestCase):
+    """'Friday around noon?' — the asked clock time steers the recommendation."""
+
+    def test_free_asked_time_is_picked_exactly(self):
+        start, _ = pick_slot([], FRI, 'midday', 60, preferred_time='12:00')
+        self.assertEqual(start, datetime(2026, 7, 10, 12, 0))
+
+    def test_busy_asked_time_yields_closest_free_slot(self):
+        # Busy 12:00–13:00; asked for noon → 1:00 PM (closest free), NOT the
+        # bucket's earliest-after-conflict-free logic landing elsewhere.
+        busy = [block(FRI, '12:00', '13:00')]
+        start, _ = pick_slot(busy, FRI, 'midday', 60, preferred_time='12:00')
+        self.assertEqual(start, datetime(2026, 7, 10, 13, 0))
+
+    def test_closest_tie_goes_to_earlier_slot(self):
+        # Busy exactly 14:00–15:00; asked 14:00 → 13:00 and 15:00 are both
+        # 60 min away → the earlier one wins.
+        busy = [block(FRI, '14:00', '15:00')]
+        start, _ = pick_slot(busy, FRI, 'midday', 60, preferred_time='14:00')
+        self.assertEqual(start, datetime(2026, 7, 10, 13, 0))
+
+    def test_no_asked_time_keeps_earliest_behaviour(self):
+        start, _ = pick_slot([], FRI, 'midday', 60, preferred_time=None)
+        self.assertEqual(start, datetime(2026, 7, 10, 12, 0))
+
+    def test_malformed_asked_time_ignored(self):
+        start, _ = pick_slot([], FRI, 'midday', 60, preferred_time='noonish')
+        self.assertEqual(start, datetime(2026, 7, 10, 12, 0))
+
+    def test_asked_time_free_true_false_none(self):
+        busy = [block(FRI, '11:30', '12:30')]
+        self.assertFalse(asked_time_free(busy, FRI, '12:00', 60))   # conflict
+        self.assertTrue(asked_time_free(busy, FRI, '15:00', 60))    # clear
+        self.assertIsNone(asked_time_free(busy, FRI, '', 60))       # no time asked
+        self.assertIsNone(asked_time_free(busy, FRI, 'noonish', 60))
+
+    def test_options_days_annotated_with_asked_time_conflict(self):
+        # Busy Friday noon; free Thursday → Friday flagged, Thursday clear.
+        result = build_options([block(FRI, '11:30', '12:30')], NOW,
+                               preferred_dates=[FRI], preferred_time='12:00')
+        by_date = {d['date']: d for d in result['days']}
+        self.assertFalse(by_date[FRI]['asked_time_free'])
+        self.assertTrue(by_date[WED]['asked_time_free'])
+
+    def test_options_annotation_null_without_asked_time(self):
+        days = option_days([], preferred_dates=[FRI])
+        self.assertTrue(all(d['asked_time_free'] is None for d in days))
+
+
 # ── Route tests (Flask test client, auth disabled, composer mocked) ───────────
 
 class TestAvailabilityRoutes(unittest.TestCase):
@@ -279,6 +329,26 @@ class TestAvailabilityRoutes(unittest.TestCase):
         # User picked Friday though they asked for Thursday — the composer is
         # told, so the reply can say "Thursday doesn't work for me, but...".
         self.assertEqual(mock_compose.call_args.kwargs['asked_when'], 'Thursday, Jul 9')
+
+    def test_recommend_with_busy_asked_time(self):
+        """'Friday around noon' + busy at noon → closest slot + conflict flag."""
+        canned = {'reply_subject': 's', 'reply_body': 'b'}
+        with patch.object(self.app_module.composer, 'compose_reply',
+                          return_value=canned) as mock_compose:
+            res = self.post('/availability/recommend', {
+                'busy': [block(FRI, '12:00', '13:00')],
+                'now': NOW, 'date': FRI, 'bucket': 'midday',
+                'activity': 'play tennis',
+                'preferred_dates': [FRI], 'preferred_time': '12:00',
+            })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['start_time'], '13:00')       # closest to noon
+        self.assertEqual(data['asked_time'], '12:00')
+        self.assertFalse(data['asked_time_free'])
+        # The composer is told they're busy at the asked time, so the reply
+        # acknowledges the shift.
+        self.assertIn('BUSY', mock_compose.call_args.kwargs['asked_when'])
 
     def test_recommend_conflict_when_bucket_full(self):
         res = self.post('/availability/recommend', {

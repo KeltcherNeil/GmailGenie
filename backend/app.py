@@ -224,7 +224,10 @@ def _parse_availability_request(data):
     if preferred is not None and not isinstance(preferred, list):
         raise ValueError("'preferred_dates' must be a list")
     preferred = [str(d) for d in (preferred or [])][:10]  # cap — it's day names from one email
-    return busy or [], now, duration, preferred
+    # The clock time the email asked for ("around noon" → "12:00"); '' when
+    # absent or malformed — availability treats an unparseable time as absent.
+    preferred_time = str(data.get('preferred_time') or '').strip()
+    return busy or [], now, duration, preferred, preferred_time
 
 
 @app.route('/availability/options', methods=['POST', 'OPTIONS'])
@@ -252,9 +255,11 @@ def availability_options_route():
         return denied
 
     try:
-        busy, now, duration, preferred = _parse_availability_request(request.get_json(silent=True))
+        busy, now, duration, preferred, preferred_time = \
+            _parse_availability_request(request.get_json(silent=True))
         options = availability.build_options(
-            busy, now, duration_minutes=duration, preferred_dates=preferred)
+            busy, now, duration_minutes=duration, preferred_dates=preferred,
+            preferred_time=preferred_time)
         return jsonify(options), 200
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -290,12 +295,13 @@ def availability_recommend_route():
 
     data = request.get_json(silent=True)
     try:
-        busy, now, duration, preferred = _parse_availability_request(data)
+        busy, now, duration, preferred, preferred_time = _parse_availability_request(data)
         day    = (data.get('date') or '').strip()
         bucket = (data.get('bucket') or '').strip()
         if not day or not bucket:
             raise ValueError("Missing required field: 'date' and 'bucket' are required")
-        slot = availability.pick_slot(busy, day, bucket, duration_minutes=duration, now=now)
+        slot = availability.pick_slot(busy, day, bucket, duration_minutes=duration,
+                                      now=now, preferred_time=preferred_time)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception as exc:
@@ -307,14 +313,24 @@ def availability_recommend_route():
 
     start, end = slot
 
-    # Human labels of the day(s) the email asked about, so the reply can
-    # acknowledge when the proposed day differs ("Thursday's no good, but...").
+    # Was the exact time the email asked for free? (None when no time asked.)
+    # Lets the popup explain "you're busy at noon, so here's the closest slot"
+    # and the reply acknowledge the shift.
+    asked_free = availability.asked_time_free(busy, day, preferred_time, duration)
+
+    # Human description of what the email asked about, so the reply can
+    # acknowledge when the proposal differs ("noon's no good, but 1 works").
     asked_labels = []
     for date_str in preferred:
         try:
             asked_labels.append(availability._day_label(date.fromisoformat(date_str)))
         except ValueError:
             continue
+    asked_when = ', '.join(asked_labels)
+    if preferred_time and asked_free is not None:
+        asked_when = f"{asked_when or 'any day'} around {preferred_time}"
+        if asked_free is False:
+            asked_when += ' (the sender is BUSY at that exact time)'
 
     reply = composer.compose_reply(
         activity=(data.get('activity') or 'meet up').strip(),
@@ -323,7 +339,7 @@ def availability_recommend_route():
         end=end,
         subject=(data.get('subject') or '').strip(),
         sender=(data.get('sender') or '').strip(),
-        asked_when=', '.join(asked_labels),
+        asked_when=asked_when,
     )
 
     return jsonify({
@@ -331,6 +347,8 @@ def availability_recommend_route():
         'start_time': start.strftime('%H:%M'),
         'end_time': end.strftime('%H:%M'),
         'duration_minutes': duration,
+        'asked_time': preferred_time or None,
+        'asked_time_free': asked_free,
         'reply_subject': reply['reply_subject'],
         'reply_body': reply['reply_body'],
     }), 200
