@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.5.0)');
+console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.5.1)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -379,8 +379,11 @@ function toLocalStamp(d) {
 }
 
 // GET the user's upcoming events and reduce them to busy blocks. Skips
-// cancelled events, events marked "Free" (transparent), invitations the user
-// declined, and all-day events (which Google defaults to "Free" anyway).
+// cancelled events, invitations the user declined, working-location banners,
+// and all-day events (birthdays/reminders). Any other TIMED event counts as
+// busy — including ones marked "Free" in Google Calendar. For this product,
+// on-your-calendar means you're busy; honoring the Free flag made an
+// 11:00–2:30 "school" event invisible and the wizard offered noon over it.
 async function fetchBusyBlocks(token) {
   const now = new Date();
   const params = new URLSearchParams({
@@ -405,7 +408,7 @@ async function fetchBusyBlocks(token) {
   const busy = [];
   for (const ev of data.items || []) {
     if (ev.status === 'cancelled') continue;
-    if (ev.transparency === 'transparent') continue;            // marked "Free"
+    if (ev.eventType === 'workingLocation') continue;           // "working from home" banner, not a commitment
     if (!ev.start?.dateTime || !ev.end?.dateTime) continue;     // all-day
     const self = (ev.attendees || []).find((a) => a.self);
     if (self && self.responseStatus === 'declined') continue;

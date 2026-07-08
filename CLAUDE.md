@@ -500,8 +500,12 @@ booked day or part of day is **never offered**:
 - **Timezone-free backend:** the extension converts everything to the user's
   local wall-clock (`YYYY-MM-DDTHH:MM` naive stamps) before sending, so
   `availability.py` does plain datetime math.
-- Events marked "Free" (transparent), declined invitations, and all-day events
-  do not count as busy.
+- **What counts as busy:** every TIMED event — deliberately including ones
+  marked "Free" (transparent) in Google Calendar, because for this product
+  on-your-calendar means busy (a real 11:00–2:30 event marked Free once made
+  the wizard offer noon over it). Exceptions that do NOT count: declined
+  invitations, working-location banners, and all-day events
+  (birthdays/reminders).
 
 ---
 

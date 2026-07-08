@@ -399,7 +399,7 @@ function buildWizard(availability) {
       body = `
         <p class="wiz-question">Pick a time — ${esc(day.label)}, ${esc(BUCKET_META[wiz.bucket].label.toLowerCase())}</p>
         <div class="chip-grid">${chips}</div>
-        <p class="wiz-hint">&#9733; suggested &middot; only times you're free are shown</p>
+        <p class="wiz-hint">You're free at every time shown &middot; &#9733; = suggested (closest to what they asked)</p>
         <button class="wiz-back" data-back="bucket">&#8592; Different time of day</button>
       `;
       break;
