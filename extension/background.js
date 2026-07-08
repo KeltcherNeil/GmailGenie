@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.1)');
+console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.2)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -103,20 +103,22 @@ function normalizeExtraction(data) {
   return { events, availability, quota };
 }
 
-// force=true → the user explicitly asked for this scan (popup button), so it
-// runs even for free-tier users. Without force, auto-scan is a PREMIUM perk:
-// free users would otherwise burn their weekly quota just by reading email.
+// Every email open auto-scans, free or premium — the tiers differ ONLY in the
+// weekly scan limit. force=true (popup retry) skips the local out-of-quota
+// short-circuit so a stale cache can't block a valid scan.
 async function handleEmailOpened(emailData, force = false) {
   const jobId = Date.now().toString();
   currentJobId = jobId;
 
   if (!force) {
+    // Already known to be out of scans? Show the paywall without a pointless
+    // backend round-trip on every opened email. The cache is short-lived and
+    // refreshed on popup open, so a new week / fresh subscription unsticks it.
     const billing = await getBillingStatus();
-    if (billing && billing.metered && !billing.premium) {
-      // Free tier: hold the email and let the popup offer a manual scan
-      // showing the remaining quota. No backend call, no quota spent.
+    if (billing && billing.metered && !billing.premium &&
+        (billing.used || 0) >= (billing.limit || 0)) {
       await chrome.storage.local.set({
-        status: 'scan_ready', emailData, billing,
+        status: 'quota_exceeded', emailData, billing,
         events: null, availability: null, error: null
       });
       return;

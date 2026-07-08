@@ -366,10 +366,12 @@ allowlist → per-user Google auth → rate limit) via `_request_gate()` in `app
 ## Freemium model
 
 - **Free:** `FREE_SCANS_PER_WEEK` (env, default 10) extractions per Google
-  account per ISO week (UTC, resets Monday). Free users scan MANUALLY — the
-  popup shows "Scan this email · x of 10 left"; auto-scan is gated client-side
-  in `background.js` on the cached `/billing/status`.
-- **Premium:** $2.99/month via Stripe Checkout → unlimited scans + auto-scan.
+  account per ISO week (UTC, resets Monday). Free and premium behave
+  IDENTICALLY (auto-scan on every opened email) — the tiers differ ONLY in
+  the weekly limit (deliberate product decision, 2026-07-08). Once the cached
+  billing state shows the quota exhausted, `background.js` short-circuits to
+  the paywall without calling the backend on each email open.
+- **Premium:** $2.99/month via Stripe Checkout → unlimited scans.
   `RATE_LIMITS` (30/min, 300/day) stays as the abuse ceiling.
 - **Where things live:** quota rule = `billing._apply_scan` (pure, tested in
   `tests/test_billing.py`); state = Firestore (`users/{google_sub}`,

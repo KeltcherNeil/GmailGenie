@@ -102,7 +102,6 @@ function render(data) {
         renderNoEvent('done');
       }
       break;
-    case 'scan_ready':     renderScanReady(data.billing);     break;
     case 'quota_exceeded': renderQuotaExceeded(data.billing); break;
     case 'auth_required': renderAuthRequired(); break;
     case 'error':   renderError(error);   break;
@@ -742,29 +741,7 @@ function wireUpgradeButton(el) {
   });
 }
 
-// Free-tier user opened an email: auto-scan is a premium perk, so offer a
-// manual scan with the remaining weekly quota front and center.
-function renderScanReady(billing) {
-  const left = scansLeft(billing);
-  mainContent.innerHTML = `
-    <div class="empty-view">
-      <div class="empty-icon">&#128269;</div>
-      <p>Scan this email for scheduling info?</p>
-      <button id="force-scan-btn" class="btn primary scan-btn">&#128269; Scan this email</button>
-      <p class="sub">${left} of ${billing?.limit ?? 10} free scans left this week</p>
-      ${billing?.upgrade_available ? `
-        <button id="upgrade-btn" class="btn secondary scan-btn">&#11088; Upgrade — $2.99/mo &middot; unlimited + auto-scan</button>
-      ` : ''}
-    </div>
-  `;
-  document.getElementById('force-scan-btn').addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'FORCE_SCAN' });
-    renderProcessing();
-  });
-  wireUpgradeButton(document.getElementById('upgrade-btn'));
-}
-
-// Weekly free quota exhausted — the backend refused the scan (402).
+// Weekly free quota exhausted — scanning resumes Monday (or with Premium).
 function renderQuotaExceeded(billing) {
   mainContent.innerHTML = `
     <div class="empty-view">
@@ -772,8 +749,8 @@ function renderQuotaExceeded(billing) {
       <p>You've used all ${billing?.limit ?? 10} free scans for this week.</p>
       <p class="sub">Free scans reset ${resetsLabel(billing)}.</p>
       ${billing?.upgrade_available ? `
-        <button id="upgrade-btn" class="btn primary scan-btn">&#11088; Upgrade — $2.99/mo &middot; unlimited + auto-scan</button>
-        <p class="sub">Unlimited scans, automatic detection as you read, cancel anytime.</p>
+        <button id="upgrade-btn" class="btn primary scan-btn">&#11088; Upgrade — $2.99/mo &middot; unlimited scans</button>
+        <p class="sub">Unlimited scans, cancel anytime.</p>
       ` : ''}
     </div>
   `;
