@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.3.0)');
+console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.3.1)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.

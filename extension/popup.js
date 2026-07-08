@@ -589,8 +589,21 @@ function renderNoEvent(reason) {
       <div class="empty-icon">&#128203;</div>
       <p>No scheduling information found in this email.</p>
       <p class="sub">Open an email that mentions a meeting, appointment, or event.</p>
+      <button id="copy-debug-btn" class="dismiss-link">Missed something? Copy scan details</button>
     </div>
   `;
+
+  // Copies exactly what was scanned (subject/sender/body as sent to the
+  // backend) so a missed detection can be reproduced instead of guessed at.
+  document.getElementById('copy-debug-btn').addEventListener('click', async (e) => {
+    const { subject = '', sender = '', body = '' } = currentState.emailData || {};
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({ subject, sender, body }, null, 2));
+      e.target.textContent = 'Copied ✓ — paste it when reporting the miss';
+    } catch {
+      e.target.textContent = 'Could not copy';
+    }
+  });
 }
 
 // Shown when the backend requires a signed-in Google user (production) and the

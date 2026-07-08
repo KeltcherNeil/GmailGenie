@@ -97,6 +97,10 @@ Rules:
   recaps, sports scores, results, and "here's how it went" storytelling are NOT
   events. Scores like "5-0", "7-5", "6:30" inside a recap are NOT times. Only
   extract something the reader could actually put on a calendar.
+- BUT a mostly-narrative email often still contains one real future event,
+  typically near the end ("Next Tuesday we wrap up the season at home at
+  8 p.m."). Ignoring the recap must NOT mean ignoring that — read past the
+  storytelling and extract the scheduling that follows it.
 - confidence=high   → you can determine BOTH a specific calendar date and a time
 - confidence=medium → only one of date/time can be determined
 - confidence=low    → only a vague reference ("sometime next week", "soon")
@@ -180,6 +184,9 @@ def extract_event(subject: str, body: str, sender: str = '', today: str = '') ->
         # Room for several events; a single event is ~120 tokens, so this covers
         # roughly a dozen before truncation.
         max_tokens=1500,
+        # Extraction is a classification task — greedy decoding, so the same
+        # email always yields the same result (no roll-of-the-dice misses).
+        temperature=0,
         system=SYSTEM_PROMPT,
         messages=[
             {'role': 'user', 'content': f"Today's date: {today}\n\nEMAIL:\n{email_text}"}
