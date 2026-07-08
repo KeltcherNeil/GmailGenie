@@ -300,8 +300,17 @@ def availability_recommend_route():
         bucket = (data.get('bucket') or '').strip()
         if not day or not bucket:
             raise ValueError("Missing required field: 'date' and 'bucket' are required")
-        slot = availability.pick_slot(busy, day, bucket, duration_minutes=duration,
-                                      now=now, preferred_time=preferred_time)
+        # chosen_time: the exact slot the user picked from the offered chips.
+        # Without it, fall back to auto-picking (closest to the asked time).
+        chosen_time = (data.get('chosen_time') or '').strip()
+        if chosen_time:
+            slot = availability.slot_at(busy, day, bucket, chosen_time,
+                                        duration_minutes=duration, now=now)
+            if slot is None:
+                return jsonify({'error': 'That time is no longer free — pick another'}), 409
+        else:
+            slot = availability.pick_slot(busy, day, bucket, duration_minutes=duration,
+                                          now=now, preferred_time=preferred_time)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception as exc:

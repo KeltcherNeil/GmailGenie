@@ -307,6 +307,18 @@ function activityLabel(availability) {
   return availability.activity || 'meet up';
 }
 
+// Which slot to star on the time-picker step: the one closest to the time the
+// email asked for (ties → earlier), else the earliest. Mirrors the backend's
+// pick_slot rule so the star matches what auto-pick would have chosen.
+function suggestedSlot(slots, preferredTime) {
+  if (!slots.length) return null;
+  const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  if (!preferredTime || isNaN(toMin(preferredTime))) return slots[0];
+  const target = toMin(preferredTime);
+  return slots.reduce((best, s) =>
+    Math.abs(toMin(s) - target) < Math.abs(toMin(best) - target) ? s : best, slots[0]);
+}
+
 // "play tennis" (+ requester) → calendar event title "Play tennis with Sam".
 function wizardEventTitle(availability) {
   const activity = activityLabel(availability);
@@ -374,13 +386,36 @@ function buildWizard(availability) {
       break;
     }
 
+    case 'time': {
+      // Every free start time in the chosen bucket, as pickable chips. The
+      // suggested one (closest to the asked time, else earliest) is starred.
+      const day = wiz.days[wiz.dayIdx];
+      const slots = (day.slots && day.slots[wiz.bucket]) || [];
+      const suggested = suggestedSlot(slots, availability.preferred_time);
+      const chips = slots.map((t) =>
+        `<button class="chip chip-time ${t === suggested ? 'chip-suggested' : ''}" data-time="${t}">
+           ${t === suggested ? '&#9733; ' : ''}${esc(formatTime(t))}
+         </button>`).join('');
+      body = `
+        <p class="wiz-question">Pick a time — ${esc(day.label)}, ${esc(BUCKET_META[wiz.bucket].label.toLowerCase())}</p>
+        <div class="chip-grid">${chips}</div>
+        <p class="wiz-hint">&#9733; suggested &middot; only times you're free are shown</p>
+        <button class="wiz-back" data-back="bucket">&#8592; Different time of day</button>
+      `;
+      break;
+    }
+
     case 'rec': {
       const rec = wiz.rec;
       const when = `${formatDate(rec.date)} · ${formatTime(rec.start_time)}–${formatTime(rec.end_time)}`;
       // The asked-for time was busy → explain why the proposal differs.
+      // Worded differently when the user hand-picked the time themselves.
       const shifted = (rec.asked_time_free === false && rec.asked_time)
-        ? `<p class="wiz-notice">&#9888;&#65039; You're busy at ${esc(formatTime(rec.asked_time))},
-             so this is the closest time you're free.</p>`
+        ? (wiz.chosenTime
+            ? `<p class="wiz-notice">&#9888;&#65039; Heads up: they asked for ${esc(formatTime(rec.asked_time))},
+                 but you're busy then.</p>`
+            : `<p class="wiz-notice">&#9888;&#65039; You're busy at ${esc(formatTime(rec.asked_time))},
+                 so this is the closest time you're free.</p>`)
         : '';
       body = `
         ${shifted}
@@ -394,7 +429,7 @@ function buildWizard(availability) {
         </label>
         <button id="wiz-add-cal" class="btn cal full-width">${ICON.calendar} Add to Calendar</button>
         <button id="wiz-reply-btn" class="btn secondary full-width wiz-reply-btn">&#9993;&#65039; Reply in Gmail</button>
-        <button class="wiz-back" data-back="bucket">&#8592; Different time</button>
+        <button class="wiz-back" data-back="${wiz.days?.[wiz.dayIdx]?.slots ? 'time' : 'bucket'}">&#8592; Different time</button>
       `;
       break;
     }
@@ -480,41 +515,59 @@ function wireWizard(availability) {
     });
   });
 
-  // Step 2 → part of day chosen → fetch the recommendation + reply draft.
+  // Fetch the slot confirmation + drafted reply for the chosen day/bucket/time.
+  const requestRecommendation = async (chosenTime) => {
+    wiz.chosenTime = chosenTime || null;
+    wiz.step = 'loading';
+    wiz.loadingText = 'Drafting your reply…';
+    rerenderWizard();
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({
+        type: 'AVAILABILITY_RECOMMEND',
+        payload: {
+          busy: wiz.busy,
+          date: wiz.days[wiz.dayIdx].date,
+          bucket: wiz.bucket,
+          chosen_time: chosenTime || '',
+          duration_minutes: availability.duration_minutes || 60,
+          activity: activityLabel(availability),
+          requester_name: availability.requester_name || '',
+          sender: currentState.emailData?.sender || '',
+          subject: currentState.emailData?.subject || '',
+          // What the email asked about — lets the recommendation stick
+          // close to the asked time and the drafted reply acknowledge
+          // when the proposal differs from it.
+          preferred_dates: availability.preferred_dates || [],
+          preferred_time: availability.preferred_time || '',
+        },
+      });
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    if (!result || !result.ok) return wizardFail(result && result.error);
+    wiz.rec = result;
+    wiz.step = 'rec';
+    rerenderWizard();
+  };
+
+  // Step 2 → part of day chosen → show that bucket's individual free times.
+  // (Older options responses have no slots list — recommend directly then.)
   block.querySelectorAll('.chip[data-bucket]').forEach((chip) => {
-    chip.addEventListener('click', async () => {
+    chip.addEventListener('click', () => {
       wiz.bucket = chip.dataset.bucket;
-      wiz.step = 'loading';
-      wiz.loadingText = 'Picking a time and drafting your reply…';
-      rerenderWizard();
-      let result;
-      try {
-        result = await chrome.runtime.sendMessage({
-          type: 'AVAILABILITY_RECOMMEND',
-          payload: {
-            busy: wiz.busy,
-            date: wiz.days[wiz.dayIdx].date,
-            bucket: wiz.bucket,
-            duration_minutes: availability.duration_minutes || 60,
-            activity: activityLabel(availability),
-            requester_name: availability.requester_name || '',
-            sender: currentState.emailData?.sender || '',
-            subject: currentState.emailData?.subject || '',
-            // What the email asked about — lets the recommendation stick
-            // close to the asked time and the drafted reply acknowledge
-            // when the proposal differs from it.
-            preferred_dates: availability.preferred_dates || [],
-            preferred_time: availability.preferred_time || '',
-          },
-        });
-      } catch (err) {
-        result = { ok: false, error: err.message };
+      if (wiz.days[wiz.dayIdx].slots) {
+        wiz.step = 'time';
+        rerenderWizard();
+      } else {
+        requestRecommendation(null);
       }
-      if (!result || !result.ok) return wizardFail(result && result.error);
-      wiz.rec = result;
-      wiz.step = 'rec';
-      rerenderWizard();
     });
+  });
+
+  // Step 3 → exact time chosen.
+  block.querySelectorAll('.chip[data-time]').forEach((chip) => {
+    chip.addEventListener('click', () => requestRecommendation(chip.dataset.time));
   });
 
   // Step 3 → create the calendar event for the recommended slot.

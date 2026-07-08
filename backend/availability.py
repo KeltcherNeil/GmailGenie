@@ -127,16 +127,21 @@ def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
     today     = now_dt.date()
 
     def day_entry(day, preferred):
-        buckets = {
-            name: bool(slot_starts(intervals, day, name, duration_minutes, now=now_dt))
+        # Every free start time per bucket — the UI shows these as pickable
+        # chips after the user chooses a part of day.
+        slots = {
+            name: [s.strftime('%H:%M')
+                   for s in slot_starts(intervals, day, name, duration_minutes, now=now_dt)]
             for name in BUCKET_ORDER
         }
+        buckets = {name: bool(slots[name]) for name in BUCKET_ORDER}
         if not any(buckets.values()):
             return None  # fully booked
         return {
             'date': day.isoformat(),
             'label': _day_label(day),
             'buckets': buckets,
+            'slots': slots,
             'preferred': preferred,
             'asked_time_free': asked_time_free(
                 busy, day.isoformat(), preferred_time, duration_minutes),
@@ -199,6 +204,27 @@ def asked_time_free(busy, day_str: str, time_str: str,
         return None
     start = datetime.combine(day, pref)
     return _is_free(start, start + timedelta(minutes=duration_minutes), parse_busy(busy))
+
+
+def slot_at(busy, day_str: str, bucket: str, time_str: str,
+            duration_minutes=DEFAULT_DURATION_MINUTES, now=None):
+    """
+    The exact slot the USER picked from the offered chips. Returns
+    (start, end) datetimes when that time is (still) a free candidate in the
+    bucket, or None — e.g. the calendar changed since the chips were built.
+    """
+    pref = _parse_pref_time(time_str)
+    if pref is None:
+        return None
+    intervals = parse_busy(busy)
+    day       = date.fromisoformat(day_str)
+    now_dt    = _parse_stamp(now) if now else None
+
+    target = datetime.combine(day, pref)
+    for start in slot_starts(intervals, day, bucket, duration_minutes, now=now_dt):
+        if start == target:
+            return start, start + timedelta(minutes=duration_minutes)
+    return None
 
 
 def pick_slot(busy, day_str: str, bucket: str,

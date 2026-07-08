@@ -421,6 +421,26 @@ textarea.field-input { resize: vertical; min-height: 32px; line-height: 1.4; }
 }
 .wiz-back:hover { text-decoration: underline; }
 
+/* Time-picker step: compact grid of free start times */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.chip.chip-time {
+  justify-content: center;
+  padding: 9px 4px;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.chip.chip-suggested {
+  border-color: var(--accent-2);
+  background: linear-gradient(135deg, rgba(106, 17, 203, 0.07), rgba(37, 117, 252, 0.07));
+  color: var(--accent);
+}
+
 /* "They asked" badge — marks the day / time of day the email requested */
 .chip-pref {
   font-size: 10px;

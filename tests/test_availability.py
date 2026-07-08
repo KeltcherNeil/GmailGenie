@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import availability
 from availability import (asked_time_free, build_options, parse_busy,
-                          pick_slot, slot_starts)
+                          pick_slot, slot_at, slot_starts)
 
 # A fixed "now": Tuesday, July 7, 2026, 9:30 AM. Candidate days start Wednesday.
 NOW = '2026-07-07T09:30'
@@ -258,6 +258,32 @@ class TestAskedTime(unittest.TestCase):
         self.assertTrue(all(d['asked_time_free'] is None for d in days))
 
 
+class TestSlotChips(unittest.TestCase):
+    """The time-picker step: options list every free start; slot_at honours
+    the user's exact pick."""
+
+    def test_options_include_free_slots_per_bucket(self):
+        days = option_days([block(WED, '09:00', '10:30')])
+        wed = next(d for d in days if d['date'] == WED)
+        self.assertEqual(wed['slots']['morning'], ['08:00', '10:30', '11:00'])
+        # Bucket availability and its slot list agree by construction.
+        self.assertEqual(wed['buckets']['morning'], bool(wed['slots']['morning']))
+        self.assertEqual(len(wed['slots']['midday']), 9)   # 12:00 … 16:00, free
+
+    def test_slot_at_returns_the_exact_pick(self):
+        start, end = slot_at([], FRI, 'midday', '14:30', 60)
+        self.assertEqual(start, datetime(2026, 7, 10, 14, 30))
+        self.assertEqual(end, datetime(2026, 7, 10, 15, 30))
+
+    def test_slot_at_rejects_a_now_busy_time(self):
+        # The pick was free when the chips were built, but the calendar changed.
+        self.assertIsNone(slot_at([block(FRI, '14:00', '15:00')], FRI, 'midday', '14:30', 60))
+
+    def test_slot_at_rejects_offgrid_and_malformed(self):
+        self.assertIsNone(slot_at([], FRI, 'midday', '14:10', 60))  # not on the grid
+        self.assertIsNone(slot_at([], FRI, 'midday', 'threeish', 60))
+
+
 # ── Route tests (Flask test client, auth disabled, composer mocked) ───────────
 
 class TestAvailabilityRoutes(unittest.TestCase):
@@ -361,6 +387,24 @@ class TestAvailabilityRoutes(unittest.TestCase):
         res = self.post('/availability/recommend',
                         {'busy': [], 'now': NOW, 'date': THU, 'bucket': 'brunch'})
         self.assertEqual(res.status_code, 400)
+
+    def test_recommend_honours_chosen_time(self):
+        canned = {'reply_subject': 's', 'reply_body': 'b'}
+        with patch.object(self.app_module.composer, 'compose_reply', return_value=canned):
+            res = self.post('/availability/recommend', {
+                'busy': [], 'now': NOW, 'date': FRI, 'bucket': 'midday',
+                'activity': 'play tennis', 'chosen_time': '15:30',
+            })
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['start_time'], '15:30')
+
+    def test_recommend_409_when_chosen_time_taken(self):
+        res = self.post('/availability/recommend', {
+            'busy': [block(FRI, '15:00', '16:00')],
+            'now': NOW, 'date': FRI, 'bucket': 'midday',
+            'activity': 'play tennis', 'chosen_time': '15:30',
+        })
+        self.assertEqual(res.status_code, 409)
 
 
 if __name__ == '__main__':
