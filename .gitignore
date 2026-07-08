@@ -30,3 +30,4 @@ env/
 
 # Extension signing key (keep private, do not commit)
 extension-key.pem
+*.zip
