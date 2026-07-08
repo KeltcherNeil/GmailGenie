@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.3.1)');
+console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.4.0)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -119,9 +119,11 @@ async function handleEmailOpened(emailData) {
     if (currentJobId === jobId) {
       await chrome.storage.local.set({ status: 'done', events, availability, error: null });
 
-      // Badge mode — put a green dot on the icon to signal something was found
-      if (events.length || availability) {
-        const { notificationMode = 'none' } = await chrome.storage.local.get('notificationMode');
+      // Badge mode — put a green dot on the icon to signal something was found.
+      // An availability request only counts when the scheduler is enabled.
+      const { notificationMode = 'none', availabilityEnabled } =
+        await chrome.storage.local.get(['notificationMode', 'availabilityEnabled']);
+      if (events.length || (availability && availabilityEnabled !== false)) {
         if (notificationMode === 'badge') {
           chrome.action.setBadgeText({ text: events.length > 1 ? String(events.length) : '!' });
           chrome.action.setBadgeBackgroundColor({ color: '#188038' });

@@ -473,11 +473,12 @@ function showAvailabilityCard(availability) {
 // Watch storage — show or remove card based on current mode
 chrome.storage.onChanged.addListener((_, area) => {
   if (area !== 'local') return;
-  chrome.storage.local.get(['status', 'events', 'availability', 'notificationMode'], (data) => {
+  chrome.storage.local.get(['status', 'events', 'availability', 'notificationMode', 'availabilityEnabled'], (data) => {
     if (data.status === 'done' && data.notificationMode === 'card') {
       if (data.events?.length) {
         showEventCard(data.events);          // events card wins when both exist
-      } else if (data.availability) {
+      } else if (data.availability && data.availabilityEnabled !== false) {
+        // Availability scheduler can be switched off in Settings.
         showAvailabilityCard(data.availability);
       }
     } else if (data.status === 'idle') {

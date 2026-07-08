@@ -11,7 +11,7 @@ const settingsBtn    = document.getElementById('settings-btn');
 async function init() {
   const data = await chrome.storage.local.get([
     'status', 'events', 'availability', 'error', 'emailData', 'notificationMode',
-    'processingStartedAt'
+    'processingStartedAt', 'availabilityEnabled'
   ]);
   currentState = data;
   render(data);
@@ -20,6 +20,15 @@ async function init() {
   const savedMode = data.notificationMode || 'none';
   const activeRadio = document.querySelector(`input[name="notif-mode"][value="${savedMode}"]`);
   if (activeRadio) activeRadio.checked = true;
+
+  // Availability scheduler toggle (default: on). Changing it writes storage,
+  // which re-renders via storage.onChanged — the wizard appears/disappears
+  // immediately, no rescan needed.
+  const availToggle = document.getElementById('avail-toggle');
+  availToggle.checked = data.availabilityEnabled !== false;
+  availToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ availabilityEnabled: e.target.checked });
+  });
 
   // Clear badge whenever the popup is opened
   chrome.action.setBadgeText({ text: '' });
@@ -39,7 +48,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ── Routing ─────────────────────────────────────────────────────────────────
 
 function render(data) {
-  const { status, events, availability, error } = data;
+  const { status, events, error } = data;
+  // The availability wizard can be switched off in Settings (default: on).
+  const availability = (data.availabilityEnabled !== false) ? data.availability : null;
 
   switch (status) {
     case 'processing': renderProcessing(); break;
@@ -419,7 +430,9 @@ function buildWizard(availability) {
 }
 
 function rerenderWizard() {
-  renderResults(currentState.events || [], currentState.availability || null);
+  const availability = (currentState.availabilityEnabled !== false)
+    ? currentState.availability : null;
+  renderResults(currentState.events || [], availability || null);
 }
 
 function wizardFail(msg) {
