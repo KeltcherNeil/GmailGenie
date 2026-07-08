@@ -97,50 +97,95 @@ class TestSlotStarts(unittest.TestCase):
             slot_starts([], datetime(2026, 7, 8).date(), 'brunch', 60)
 
 
+def option_days(busy, **kwargs):
+    """Shorthand: the 'days' list from build_options."""
+    return build_options(busy, NOW, **kwargs)['days']
+
+
 class TestBuildOptions(unittest.TestCase):
 
     def test_free_calendar_offers_next_three_days(self):
-        days = build_options([], NOW)
+        days = option_days([])
         self.assertEqual([d['date'] for d in days], [WED, THU, FRI])
         for d in days:
             self.assertEqual(d['buckets'], {'morning': True, 'midday': True, 'evening': True})
+            self.assertFalse(d['preferred'])
 
     def test_days_start_tomorrow_not_today(self):
-        days = build_options([], NOW)
+        days = option_days([])
         self.assertNotIn('2026-07-07', [d['date'] for d in days])
 
     def test_fully_booked_day_is_not_offered(self):
         # Friday fully booked → the wizard must NOT offer Friday; Saturday takes its place.
-        days = build_options([busy_all_day(FRI)], NOW)
+        days = option_days([busy_all_day(FRI)])
         self.assertEqual([d['date'] for d in days], [WED, THU, SAT])
 
     def test_booked_bucket_is_marked_unavailable(self):
         # Thursday morning fully booked → Thursday still offered, morning disabled.
-        days = build_options([block(THU, '08:00', '12:00')], NOW)
+        days = option_days([block(THU, '08:00', '12:00')])
         thu = next(d for d in days if d['date'] == THU)
         self.assertEqual(thu['buckets'], {'morning': False, 'midday': True, 'evening': True})
 
     def test_bucket_with_gap_too_small_is_unavailable(self):
         # Morning busy except 8:00–8:45: no room for a 60-min slot on the grid.
-        days = build_options([block(WED, '08:45', '12:00')], NOW, duration_minutes=60)
+        days = option_days([block(WED, '08:45', '12:00')], duration_minutes=60)
         wed = next(d for d in days if d['date'] == WED)
         self.assertFalse(wed['buckets']['morning'])
         # ...but a 30-min activity fits at 8:00.
-        days = build_options([block(WED, '08:45', '12:00')], NOW, duration_minutes=30)
+        days = option_days([block(WED, '08:45', '12:00')], duration_minutes=30)
         wed = next(d for d in days if d['date'] == WED)
         self.assertTrue(wed['buckets']['morning'])
 
     def test_multi_day_event_blocks_every_covered_day(self):
-        days = build_options([{'start': f'{WED}T00:00', 'end': f'{SAT}T00:00'}], NOW)
+        days = option_days([{'start': f'{WED}T00:00', 'end': f'{SAT}T00:00'}])
         self.assertEqual([d['date'] for d in days], [SAT, '2026-07-12', '2026-07-13'])
 
     def test_everything_booked_returns_empty(self):
         blocks = [busy_all_day(f'2026-07-{day:02d}') for day in range(8, 22)]
-        self.assertEqual(build_options(blocks, NOW), [])
+        self.assertEqual(build_options(blocks, NOW),
+                         {'days': [], 'unavailable_preferred': []})
 
     def test_labels_are_human(self):
-        days = build_options([], NOW)
-        self.assertEqual(days[0]['label'], 'Wednesday, Jul 8')
+        self.assertEqual(option_days([])[0]['label'], 'Wednesday, Jul 8')
+
+
+class TestPreferredDates(unittest.TestCase):
+    """The email's asked-for day(s) shape the options ('tennis on Thursday?')."""
+
+    def test_preferred_day_leads_and_is_flagged(self):
+        days = option_days([], preferred_dates=[THU])
+        self.assertEqual([d['date'] for d in days], [THU, WED, FRI])
+        self.assertTrue(days[0]['preferred'])
+        self.assertFalse(days[1]['preferred'])
+
+    def test_booked_preferred_day_reported_not_offered(self):
+        # "Can you play Thursday?" but Thursday is fully booked → Thursday is
+        # NOT offered, and unavailable_preferred lets the UI explain why.
+        result = build_options([busy_all_day(THU)], NOW, preferred_dates=[THU])
+        self.assertEqual([d['date'] for d in result['days']], [WED, FRI, SAT])
+        self.assertEqual(result['unavailable_preferred'],
+                         [{'date': THU, 'label': 'Thursday, Jul 9'}])
+
+    def test_multiple_preferred_days_keep_asked_order(self):
+        # "this weekend?" → Saturday and Sunday first, in that order.
+        days = option_days([], preferred_dates=[SAT, '2026-07-12'])
+        self.assertEqual([d['date'] for d in days], [SAT, '2026-07-12', WED])
+
+    def test_past_malformed_and_far_dates_ignored(self):
+        days = option_days([], preferred_dates=[
+            '2026-07-07',   # today — never offered
+            '2026-07-01',   # past
+            'next thursday', # malformed (model slip) — must not crash
+            '2026-09-01',   # beyond the scan window
+        ])
+        self.assertEqual([d['date'] for d in days], [WED, THU, FRI])
+        for d in days:
+            self.assertFalse(d['preferred'])
+
+    def test_preferred_day_not_duplicated_by_fill(self):
+        days = option_days([], preferred_dates=[WED])
+        self.assertEqual([d['date'] for d in days], [WED, THU, FRI])
+        self.assertEqual([d['preferred'] for d in days], [True, False, False])
 
 
 class TestPickSlot(unittest.TestCase):
@@ -191,6 +236,17 @@ class TestAvailabilityRoutes(unittest.TestCase):
         res = self.post('/availability/options', {'busy': []})
         self.assertEqual(res.status_code, 400)
 
+    def test_options_route_with_preferred_dates(self):
+        res = self.post('/availability/options', {
+            'busy': [busy_all_day(FRI)], 'now': NOW,
+            'preferred_dates': [THU, FRI],   # Friday asked for but fully booked
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['days'][0]['date'], THU)
+        self.assertTrue(data['days'][0]['preferred'])
+        self.assertEqual(data['unavailable_preferred'][0]['date'], FRI)
+
     def test_recommend_route(self):
         canned = {'reply_subject': 'Re: Tennis?', 'reply_body': 'Thursday works!'}
         with patch.object(self.app_module.composer, 'compose_reply',
@@ -209,6 +265,20 @@ class TestAvailabilityRoutes(unittest.TestCase):
         # The deterministic slot is what gets composed — not a model invention.
         self.assertEqual(mock_compose.call_args.kwargs['start'],
                          datetime(2026, 7, 9, 13, 0))
+
+    def test_recommend_tells_composer_what_was_asked(self):
+        """preferred_dates flow through to the reply draft as human labels."""
+        canned = {'reply_subject': 's', 'reply_body': 'b'}
+        with patch.object(self.app_module.composer, 'compose_reply',
+                          return_value=canned) as mock_compose:
+            res = self.post('/availability/recommend', {
+                'busy': [], 'now': NOW, 'date': FRI, 'bucket': 'evening',
+                'activity': 'play tennis', 'preferred_dates': [THU],
+            })
+        self.assertEqual(res.status_code, 200)
+        # User picked Friday though they asked for Thursday — the composer is
+        # told, so the reply can say "Thursday doesn't work for me, but...".
+        self.assertEqual(mock_compose.call_args.kwargs['asked_when'], 'Thursday, Jul 9')
 
     def test_recommend_conflict_when_bucket_full(self):
         res = self.post('/availability/recommend', {

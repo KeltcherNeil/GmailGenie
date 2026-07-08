@@ -315,10 +315,20 @@ function buildWizard(availability) {
       break;
 
     case 'day': {
+      // Days the email asked for lead the list with an "asked for" badge; when
+      // an asked-for day is fully booked, say so instead of silently hiding it.
       const chips = wiz.days.map((d, i) =>
-        `<button class="chip" data-day="${i}">${esc(d.label)}</button>`).join('');
+        `<button class="chip" data-day="${i}">
+           <span>${esc(d.label)}</span>
+           ${d.preferred ? '<span class="chip-pref">They asked</span>' : ''}
+         </button>`).join('');
+      const booked = (wiz.unavailablePreferred || []).map((d) => esc(d.label)).join(' and ');
+      const notice = booked
+        ? `<p class="wiz-notice">&#9888;&#65039; You're fully booked on ${booked} — here are alternatives.</p>`
+        : '';
       body = `
         <p class="wiz-question">Which day works for you?</p>
+        ${notice}
         <div class="chip-col">${chips}</div>
         <p class="wiz-hint">Only days with free time on your calendar are shown.</p>
       `;
@@ -327,12 +337,15 @@ function buildWizard(availability) {
 
     case 'bucket': {
       const day = wiz.days[wiz.dayIdx];
+      const askedBucket = availability.preferred_time_of_day || null;
       const chips = Object.keys(BUCKET_META).map((key) => {
         const meta = BUCKET_META[key];
         const free = day.buckets[key];
+        const badge = !free ? '<span class="chip-booked">Booked</span>'
+          : (key === askedBucket ? '<span class="chip-pref">They asked</span>' : '');
         return `<button class="chip chip-bucket" data-bucket="${key}" ${free ? '' : 'disabled'}>
                   <span>${meta.icon} ${meta.label} <span class="chip-sub">${meta.hours}</span></span>
-                  ${free ? '' : '<span class="chip-booked">Booked</span>'}
+                  ${badge}
                 </button>`;
       }).join('');
       body = `
@@ -417,6 +430,7 @@ function wireWizard(availability) {
       result = await chrome.runtime.sendMessage({
         type: 'AVAILABILITY_OPTIONS',
         durationMinutes: availability.duration_minutes || 60,
+        preferredDates: availability.preferred_dates || [],
       });
     } catch (err) {
       result = { ok: false, error: err.message };
@@ -425,6 +439,7 @@ function wireWizard(availability) {
     if (!result.days.length) { wiz.step = 'nodays'; return rerenderWizard(); }
     wiz.days = result.days;
     wiz.busy = result.busy;
+    wiz.unavailablePreferred = result.unavailablePreferred || [];
     wiz.step = 'day';
     rerenderWizard();
   });
@@ -458,6 +473,9 @@ function wireWizard(availability) {
             requester_name: availability.requester_name || '',
             sender: currentState.emailData?.sender || '',
             subject: currentState.emailData?.subject || '',
+            // The day(s) the email asked about — lets the drafted reply
+            // acknowledge when the chosen day differs from what they asked.
+            preferred_dates: availability.preferred_dates || [],
           },
         });
       } catch (err) {

@@ -36,6 +36,10 @@ Rules:
 - 2-4 sentences, warm and casual, matching how people write to friends.
 - Ask them to confirm the time works (e.g. "does that work for you?").
 - Greet the requester by first name when one is given.
+- When the requester asked about specific day(s) and the proposed time falls on
+  a DIFFERENT day, briefly acknowledge theirs doesn't work ("Thursday's no good
+  for me, but...") before proposing. When it matches what they asked, just
+  confirm naturally ("Thursday works!").
 - Do NOT include a signature, sender name, or placeholders like [Your Name].
 - Subject: reply to the original subject ("Re: ...") when one is given,
   otherwise write a short natural subject.\
@@ -69,9 +73,14 @@ def _fallback_reply(activity: str, requester_name: str, start: datetime,
 
 
 def compose_reply(activity: str, requester_name: str, start: datetime,
-                  end: datetime, subject: str = '', sender: str = '') -> dict:
+                  end: datetime, subject: str = '', sender: str = '',
+                  asked_when: str = '') -> dict:
     """
     Draft the reply proposing `start` for `activity`.
+
+    `asked_when` is a human description of the day(s) the requester asked about
+    (e.g. "Thursday, Jul 9"), so the reply can acknowledge when the proposed
+    day differs from what they asked for.
 
     Returns {"reply_subject": str, "reply_body": str}. Never raises — falls
     back to a plain template on any API/parse failure, so a Claude hiccup
@@ -82,6 +91,7 @@ def compose_reply(activity: str, requester_name: str, start: datetime,
         f"Requester's first name: {requester_name or 'unknown'}\n"
         f"Requester's email: {sender or 'unknown'}\n"
         f"Original subject: {subject or '(none)'}\n"
+        f"Day(s) the requester asked about: {asked_when or 'none in particular'}\n"
         f'Proposed time: {_fmt_when(start)} (until {_fmt_time(end)})'
     )
 

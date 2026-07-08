@@ -24,6 +24,7 @@ deploy to production without both set. See DEPLOY.md.
 """
 
 import os
+from datetime import date
 
 from flask import Flask, request, jsonify, g
 from flask_limiter import Limiter
@@ -219,7 +220,11 @@ def _parse_availability_request(data):
     except (TypeError, ValueError):
         raise ValueError("'duration_minutes' must be an integer")
     duration = max(15, min(duration, 8 * 60))  # sane bounds
-    return busy or [], now, duration
+    preferred = data.get('preferred_dates')
+    if preferred is not None and not isinstance(preferred, list):
+        raise ValueError("'preferred_dates' must be a list")
+    preferred = [str(d) for d in (preferred or [])][:10]  # cap — it's day names from one email
+    return busy or [], now, duration, preferred
 
 
 @app.route('/availability/options', methods=['POST', 'OPTIONS'])
@@ -231,21 +236,26 @@ def availability_options_route():
     Request body (JSON):
         {
             "busy": [{"start": "YYYY-MM-DDTHH:MM", "end": "..."}, ...],
-            "now": "YYYY-MM-DDTHH:MM",     # user's local now
-            "duration_minutes": 60          # optional
+            "now": "YYYY-MM-DDTHH:MM",      # user's local now
+            "duration_minutes": 60,          # optional
+            "preferred_dates": ["YYYY-MM-DD"] # optional — days the EMAIL asked for
         }
 
-    Response: {"days": [{"date", "label", "buckets": {morning/midday/evening: bool}}]}
+    Response: {"days": [{"date", "label", "buckets", "preferred"}],
+               "unavailable_preferred": [{"date", "label"}]}
     Fully-booked days are omitted — the UI never offers a day that can't work.
+    Asked-for days lead the list; booked ones are reported in
+    unavailable_preferred so the UI can explain why they're missing.
     """
     denied = _request_gate()
     if denied:
         return denied
 
     try:
-        busy, now, duration = _parse_availability_request(request.get_json(silent=True))
-        days = availability.build_options(busy, now, duration_minutes=duration)
-        return jsonify({'days': days}), 200
+        busy, now, duration, preferred = _parse_availability_request(request.get_json(silent=True))
+        options = availability.build_options(
+            busy, now, duration_minutes=duration, preferred_dates=preferred)
+        return jsonify(options), 200
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception as exc:
@@ -280,7 +290,7 @@ def availability_recommend_route():
 
     data = request.get_json(silent=True)
     try:
-        busy, now, duration = _parse_availability_request(data)
+        busy, now, duration, preferred = _parse_availability_request(data)
         day    = (data.get('date') or '').strip()
         bucket = (data.get('bucket') or '').strip()
         if not day or not bucket:
@@ -296,6 +306,16 @@ def availability_recommend_route():
         return jsonify({'error': 'No free slot in that time of day — pick another'}), 409
 
     start, end = slot
+
+    # Human labels of the day(s) the email asked about, so the reply can
+    # acknowledge when the proposed day differs ("Thursday's no good, but...").
+    asked_labels = []
+    for date_str in preferred:
+        try:
+            asked_labels.append(availability._day_label(date.fromisoformat(date_str)))
+        except ValueError:
+            continue
+
     reply = composer.compose_reply(
         activity=(data.get('activity') or 'meet up').strip(),
         requester_name=(data.get('requester_name') or '').strip(),
@@ -303,6 +323,7 @@ def availability_recommend_route():
         end=end,
         subject=(data.get('subject') or '').strip(),
         sender=(data.get('sender') or '').strip(),
+        asked_when=', '.join(asked_labels),
     )
 
     return jsonify({

@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.1.0)');
+console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.2.0)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -160,7 +160,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'AVAILABILITY_OPTIONS') {
     // Availability wizard step 1: read the user's calendar (client-side),
     // send anonymous busy blocks to the backend, get back candidate days.
-    availabilityOptions(message.durationMinutes)
+    availabilityOptions(message.durationMinutes, message.preferredDates)
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
@@ -460,17 +460,23 @@ async function backendPost(path, payload, token) {
 
 // Wizard step 1 — candidate days. Interactive auth is fine here: the user just
 // clicked "Find a time", so a consent popup (first run only) is expected.
-async function availabilityOptions(durationMinutes) {
+async function availabilityOptions(durationMinutes, preferredDates) {
   const token = await getAuthToken(true);
   const busy = await fetchBusyBlocksFresh(token);
   const data = await backendPost('/availability/options', {
     busy,
     now: toLocalStamp(new Date()),
     duration_minutes: durationMinutes || 60,
+    preferred_dates: Array.isArray(preferredDates) ? preferredDates : [],
   }, token);
   // Return the busy blocks too — the popup passes them back on the recommend
   // step so the calendar isn't re-fetched (and options/recommend stay consistent).
-  return { ok: true, days: data.days || [], busy };
+  return {
+    ok: true,
+    days: data.days || [],
+    unavailablePreferred: data.unavailable_preferred || [],
+    busy,
+  };
 }
 
 // Wizard step 3 — exact slot + drafted reply for the chosen day/bucket.

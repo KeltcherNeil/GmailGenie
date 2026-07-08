@@ -62,12 +62,25 @@ an "availability_request" field next to "events":
     "activity": "short verb phrase for what is being scheduled, e.g. 'play tennis'",
     "duration_minutes": estimated typical duration as an integer (default 60),
     "requester_name": "sender's first name if evident, else null",
+    "preferred_dates": ["YYYY-MM-DD", ...],
+    "preferred_time_of_day": "morning" | "midday" | "evening" | null,
     "confidence": "high" | "medium" | "low"
   }
 }
+preferred_dates: the concrete date(s) the sender constrained the request to,
+resolved against today's date to the nearest FUTURE occurrence, in the order
+mentioned: "on Thursday" → that Thursday's date; "this weekend" → Saturday and
+Sunday; "early next week" → the 2-3 dates it covers. Use [] when the timing is
+left open ("this week", "sometime soon").
+preferred_time_of_day: set only when the sender constrained the part of day
+("Thursday evening" → "evening"; before ~11am → "morning", ~11am-5pm →
+"midday", after 5pm → "evening"), else null.
+
 Set "availability_request" to null when the email does not ask the reader for
-a time. An email that proposes a SPECIFIC time ("tennis Friday at 3?") is an
-event, NOT an availability request. An email can contain both — concrete
+a time. An email that proposes a SPECIFIC date AND time ("tennis Friday at 3?")
+is an event, NOT an availability request. But naming only a day while asking
+the reader to pick or confirm ("can you play Thursday?") IS an availability
+request with that day in preferred_dates. An email can contain both — concrete
 event(s) AND an open "when are you free?" question — return both.
 
 If no event is found, return {"events": []}.

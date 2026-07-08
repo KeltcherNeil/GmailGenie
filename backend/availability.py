@@ -94,42 +94,77 @@ def _day_label(day: date) -> str:
 
 
 def build_options(busy, now, duration_minutes=DEFAULT_DURATION_MINUTES,
-                  days_wanted=3) -> list:
+                  days_wanted=3, preferred_dates=None) -> dict:
     """
-    The day choices to offer the user: the next `days_wanted` days (starting
-    tomorrow) that have at least one free bucket. Fully-booked days are simply
-    not offered — the UI never shows a day that can't work.
+    The day choices to offer the user, honouring any dates the EMAIL asked for
+    ("can you play tennis on Thursday?" → Thursday leads the list, flagged
+    preferred=True). Fully-booked days are never offered — a booked preferred
+    day is instead reported in unavailable_preferred so the UI can say
+    "Thursday is fully booked" and show alternates.
 
     Args:
         busy:             [{"start": "YYYY-MM-DDTHH:MM", "end": ...}, ...]
         now:              the user's local now, same stamp format.
         duration_minutes: slot length the activity needs.
-        days_wanted:      how many candidate days to return.
+        days_wanted:      how many candidate days to return in total.
+        preferred_dates:  ["YYYY-MM-DD", ...] the email suggested (may be empty).
+                          Malformed, past, or beyond-scan-window dates are ignored.
 
     Returns:
-        [{"date": "2026-07-08", "label": "Wednesday, Jul 8",
-          "buckets": {"morning": true, "midday": false, "evening": true}}, ...]
-        (possibly fewer than days_wanted if the whole scan window is booked)
+        {"days": [{"date": "2026-07-09", "label": "Thursday, Jul 9",
+                   "buckets": {"morning": true, ...}, "preferred": true}, ...],
+         "unavailable_preferred": [{"date": ..., "label": ...}, ...]}
+        ("days" holds free preferred dates first, then the next free days
+        starting tomorrow, up to days_wanted; possibly fewer if all booked.)
     """
     intervals = parse_busy(busy)
     now_dt    = _parse_stamp(now)
+    today     = now_dt.date()
 
-    days = []
-    for offset in range(1, SCAN_LIMIT_DAYS + 1):
-        day = now_dt.date() + timedelta(days=offset)
+    def day_entry(day, preferred):
         buckets = {
             name: bool(slot_starts(intervals, day, name, duration_minutes, now=now_dt))
             for name in BUCKET_ORDER
         }
-        if any(buckets.values()):
-            days.append({
-                'date': day.isoformat(),
-                'label': _day_label(day),
-                'buckets': buckets,
-            })
-        if len(days) == days_wanted:
+        if not any(buckets.values()):
+            return None  # fully booked
+        return {
+            'date': day.isoformat(),
+            'label': _day_label(day),
+            'buckets': buckets,
+            'preferred': preferred,
+        }
+
+    days, unavailable_preferred = [], []
+    seen = set()
+
+    # The email's asked-for dates come first, in the order asked.
+    for date_str in preferred_dates or []:
+        try:
+            day = date.fromisoformat(str(date_str))
+        except (TypeError, ValueError):
+            continue
+        if day in seen or day <= today or day > today + timedelta(days=SCAN_LIMIT_DAYS):
+            continue
+        seen.add(day)
+        entry = day_entry(day, preferred=True)
+        if entry:
+            days.append(entry)
+        else:
+            unavailable_preferred.append({'date': day.isoformat(), 'label': _day_label(day)})
+
+    # Fill the remaining slots with the next free days, starting tomorrow.
+    for offset in range(1, SCAN_LIMIT_DAYS + 1):
+        if len(days) >= days_wanted:
             break
-    return days
+        day = today + timedelta(days=offset)
+        if day in seen:
+            continue
+        entry = day_entry(day, preferred=False)
+        if entry:
+            days.append(entry)
+
+    return {'days': days[:days_wanted], 'unavailable_preferred': unavailable_preferred}
 
 
 def pick_slot(busy, day_str: str, bucket: str,

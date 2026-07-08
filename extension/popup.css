@@ -421,6 +421,32 @@ textarea.field-input { resize: vertical; min-height: 32px; line-height: 1.4; }
 }
 .wiz-back:hover { text-decoration: underline; }
 
+/* "They asked" badge — marks the day / time of day the email requested */
+.chip-pref {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--high);
+  background: rgba(18, 183, 106, 0.10);
+  border: 1px solid rgba(18, 183, 106, 0.25);
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+/* Notice when the asked-for day is fully booked */
+.wiz-notice {
+  font-size: 12px;
+  color: #b25e09;
+  background: rgba(245, 165, 36, 0.10);
+  border: 1px solid rgba(245, 165, 36, 0.30);
+  border-radius: 10px;
+  padding: 8px 11px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+
 /* Recommendation card */
 .wiz-rec {
   background: linear-gradient(135deg, rgba(106, 17, 203, 0.07), rgba(37, 117, 252, 0.07));
