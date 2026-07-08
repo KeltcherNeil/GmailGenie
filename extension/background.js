@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.6.1)');
+console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.0)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -64,6 +64,13 @@ async function extractEvent(emailData, token) {
       err.code = 'AUTH_REQUIRED';
       throw err;
     }
+    if (res.status === 402) {
+      // Out of free scans this week — the popup shows the upgrade view.
+      const err = new Error('Out of free scans for this week');
+      err.code = 'QUOTA_EXCEEDED';
+      err.quota = data.quota || null;
+      throw err;
+    }
     if (res.status === 429) {
       throw new Error('Rate limit reached — please wait a moment and try again.');
     }
@@ -90,12 +97,31 @@ function normalizeExtraction(data) {
   const ar = data?.availability_request;
   const availability = (ar && typeof ar === 'object' && ar.activity) ? ar : null;
 
-  return { events, availability };
+  // Quota state rides along with metered responses ("x of 10 left" meter).
+  const quota = (data?.quota && typeof data.quota === 'object') ? data.quota : null;
+
+  return { events, availability, quota };
 }
 
-async function handleEmailOpened(emailData) {
+// force=true → the user explicitly asked for this scan (popup button), so it
+// runs even for free-tier users. Without force, auto-scan is a PREMIUM perk:
+// free users would otherwise burn their weekly quota just by reading email.
+async function handleEmailOpened(emailData, force = false) {
   const jobId = Date.now().toString();
   currentJobId = jobId;
+
+  if (!force) {
+    const billing = await getBillingStatus();
+    if (billing && billing.metered && !billing.premium) {
+      // Free tier: hold the email and let the popup offer a manual scan
+      // showing the remaining quota. No backend call, no quota spent.
+      await chrome.storage.local.set({
+        status: 'scan_ready', emailData, billing,
+        events: null, availability: null, error: null
+      });
+      return;
+    }
+  }
 
   // Immediately signal that we're working. processingStartedAt lets the popup
   // detect a job that died mid-flight (e.g. the extension was reloaded while
@@ -114,10 +140,12 @@ async function handleEmailOpened(emailData) {
     // not, we still call the backend: in dev (auth disabled) it works tokenless;
     // in prod it returns 401, which we surface as an "auth_required" state below.
     const token = await getAuthTokenSilent();
-    const { events, availability } = await extractEvent(emailData, token);
+    const { events, availability, quota } = await extractEvent(emailData, token);
 
     if (currentJobId === jobId) {
-      await chrome.storage.local.set({ status: 'done', events, availability, error: null });
+      const update = { status: 'done', events, availability, error: null };
+      if (quota) update.billing = { ...quota, fetchedAt: Date.now() };
+      await chrome.storage.local.set(update);
 
       // Badge mode — put a green dot on the icon to signal something was found.
       // An availability request only counts when the scheduler is enabled.
@@ -134,6 +162,10 @@ async function handleEmailOpened(emailData) {
     if (currentJobId === jobId) {
       if (err.code === 'AUTH_REQUIRED') {
         await chrome.storage.local.set({ status: 'auth_required', error: null, events: null, availability: null });
+      } else if (err.code === 'QUOTA_EXCEEDED') {
+        const update = { status: 'quota_exceeded', error: null, events: null, availability: null };
+        if (err.quota) update.billing = { ...err.quota, fetchedAt: Date.now() };
+        await chrome.storage.local.set(update);
       } else {
         await chrome.storage.local.set({ status: 'error', error: err.message, events: null, availability: null });
       }
@@ -173,11 +205,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
+  } else if (message.type === 'FORCE_SCAN') {
+    // Free-tier user clicked "Scan this email" — spend one scan on the
+    // email held in storage by the scan_ready state.
+    chrome.storage.local.get('emailData').then(({ emailData }) => {
+      if (emailData) handleEmailOpened(emailData, true);
+    });
+  } else if (message.type === 'BILLING_CHECKOUT') {
+    // Open a Stripe Checkout tab for the $2.99/mo subscription.
+    billingUrl('/billing/checkout')
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  } else if (message.type === 'BILLING_PORTAL') {
+    // Open the Stripe customer portal (manage / cancel subscription).
+    billingUrl('/billing/portal')
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  } else if (message.type === 'BILLING_REFRESH') {
+    // Popup opened (or user returned from checkout) — refresh premium/quota
+    // state. Result lands in storage, so the popup re-renders via onChanged.
+    refreshBillingStatus()
+      .then((billing) => sendResponse({ ok: true, billing }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
   } else if (message.type === 'OPEN_EDITOR') {
     openEditor(message.autoStart);
   }
   return false;
 });
+
+// ── Billing (freemium) ────────────────────────────────────────────────────────
+// Free tier: manual scans, FREE_SCANS_PER_WEEK/week (backend-enforced).
+// Premium ($2.99/mo via Stripe): auto-scan + unlimited. The extension only
+// CACHES the state — the backend is the source of truth and enforces quota.
+
+const BILLING_CACHE_MS = 10 * 60 * 1000;
+
+// Cached billing state, refreshed from the backend when stale. Returns null
+// when it can't be determined (not signed in / backend unreachable) — callers
+// treat null as "don't gate" so a billing outage never blocks scanning.
+async function getBillingStatus() {
+  const { billing } = await chrome.storage.local.get('billing');
+  if (billing && Date.now() - (billing.fetchedAt || 0) < BILLING_CACHE_MS) {
+    return billing;
+  }
+  return refreshBillingStatus();
+}
+
+async function refreshBillingStatus() {
+  const token = await getAuthTokenSilent();
+  if (!token) return null; // not connected yet — the auth flow handles this path
+  try {
+    const data = await backendPost('/billing/status', {}, token);
+    const billing = { ...data, fetchedAt: Date.now() };
+    await chrome.storage.local.set({ billing });
+    return billing;
+  } catch (err) {
+    console.log('[GmailGenie] billing status unavailable:', err.message);
+    return null;
+  }
+}
+
+// POST to a billing route that returns { url } and open it in a new tab.
+async function billingUrl(path) {
+  const token = await getAuthToken(true);
+  const data = await backendPost(path, {}, token);
+  if (!data.url) return { ok: false, error: 'No URL returned' };
+  await chrome.tabs.create({ url: data.url });
+  return { ok: true };
+}
 
 // Silently return a cached Google token, or null if the user hasn't connected
 // yet. Never shows UI — safe to call on every email open.

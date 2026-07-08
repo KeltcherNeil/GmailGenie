@@ -11,10 +11,17 @@ const settingsBtn    = document.getElementById('settings-btn');
 async function init() {
   const data = await chrome.storage.local.get([
     'status', 'events', 'availability', 'error', 'emailData', 'notificationMode',
-    'processingStartedAt', 'availabilityEnabled', 'wizardAutoStart'
+    'processingStartedAt', 'availabilityEnabled', 'wizardAutoStart', 'billing'
   ]);
   currentState = data;
   render(data);
+
+  // Refresh premium/quota state in the background on every open — cheap, and
+  // it's how the popup notices a just-completed Stripe checkout. The result
+  // lands in storage, so onChanged re-renders if anything changed.
+  chrome.runtime.sendMessage({ type: 'BILLING_REFRESH' }, () => {
+    void chrome.runtime.lastError;
+  });
 
   // Arrived via the floating card's "Pick a time"? Skip the wizard intro and
   // check the calendar right away. The flag is single-use and expires so a
@@ -42,6 +49,21 @@ async function init() {
     chrome.storage.local.set({ availabilityEnabled: e.target.checked });
   });
 
+  // "Manage subscription" (settings) — premium users only.
+  refreshSubscriptionRow(data.billing);
+  document.getElementById('manage-sub-btn').addEventListener('click', async () => {
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({ type: 'BILLING_PORTAL' });
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    if (!result || !result.ok) {
+      showActionError(document.getElementById('manage-sub-btn'),
+        (result && result.error) || 'Could not open the billing portal.');
+    }
+  });
+
   // Clear badge whenever the popup is opened
   chrome.action.setBadgeText({ text: '' });
 }
@@ -55,7 +77,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   currentState = merged;
   render(merged);
+  if (changes.billing) refreshSubscriptionRow(merged.billing);
 });
+
+// Show the settings' "Manage subscription" row only for premium users.
+function refreshSubscriptionRow(billing) {
+  document.getElementById('subscription-group')
+    ?.classList.toggle('hidden', !billing?.premium);
+}
 
 // ── Routing ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +102,8 @@ function render(data) {
         renderNoEvent('done');
       }
       break;
+    case 'scan_ready':     renderScanReady(data.billing);     break;
+    case 'quota_exceeded': renderQuotaExceeded(data.billing); break;
     case 'auth_required': renderAuthRequired(); break;
     case 'error':   renderError(error);   break;
     case 'idle':    renderIdle();          break;
@@ -156,10 +187,11 @@ function renderResults(events, availability) {
       <div class="events-list">${events.map((event, i) => buildEventCard(event, i)).join('')}</div>
   ` : '';
 
-  mainContent.innerHTML = `<div class="event-view">${wizardHTML}${eventsHTML}</div>`;
+  mainContent.innerHTML = `<div class="event-view">${wizardHTML}${eventsHTML}${quotaFooterHTML(currentState.billing)}</div>`;
 
   if (availability) wireWizard(availability);
   events.forEach((event, i) => wireEventCard(event, i));
+  wireUpgradeButton(document.getElementById('quota-upgrade-link'));
 }
 
 // HTML for one event card. All field ids are suffixed with the card index so the
@@ -679,6 +711,84 @@ function confidenceLevel(pct) {
   return 'low';
 }
 
+// ── Freemium views ────────────────────────────────────────────────────────────
+
+function scansLeft(billing) {
+  if (!billing) return null;
+  return Math.max(0, (billing.limit || 0) - (billing.used || 0));
+}
+
+// "Resets Monday"-style label from the backend's resets_at ISO stamp.
+function resetsLabel(billing) {
+  try {
+    const d = new Date(billing.resets_at);
+    return d.toLocaleDateString('en-US', { weekday: 'long' });
+  } catch { return 'Monday'; }
+}
+
+function wireUpgradeButton(el) {
+  el?.addEventListener('click', async () => {
+    el.disabled = true;
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({ type: 'BILLING_CHECKOUT' });
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    el.disabled = false;
+    if (!result || !result.ok) {
+      showActionError(el, (result && result.error) || 'Could not start checkout.');
+    }
+  });
+}
+
+// Free-tier user opened an email: auto-scan is a premium perk, so offer a
+// manual scan with the remaining weekly quota front and center.
+function renderScanReady(billing) {
+  const left = scansLeft(billing);
+  mainContent.innerHTML = `
+    <div class="empty-view">
+      <div class="empty-icon">&#128269;</div>
+      <p>Scan this email for scheduling info?</p>
+      <button id="force-scan-btn" class="btn primary scan-btn">&#128269; Scan this email</button>
+      <p class="sub">${left} of ${billing?.limit ?? 10} free scans left this week</p>
+      ${billing?.upgrade_available ? `
+        <button id="upgrade-btn" class="btn secondary scan-btn">&#11088; Upgrade — $2.99/mo &middot; unlimited + auto-scan</button>
+      ` : ''}
+    </div>
+  `;
+  document.getElementById('force-scan-btn').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'FORCE_SCAN' });
+    renderProcessing();
+  });
+  wireUpgradeButton(document.getElementById('upgrade-btn'));
+}
+
+// Weekly free quota exhausted — the backend refused the scan (402).
+function renderQuotaExceeded(billing) {
+  mainContent.innerHTML = `
+    <div class="empty-view">
+      <div class="empty-icon">&#9203;</div>
+      <p>You've used all ${billing?.limit ?? 10} free scans for this week.</p>
+      <p class="sub">Free scans reset ${resetsLabel(billing)}.</p>
+      ${billing?.upgrade_available ? `
+        <button id="upgrade-btn" class="btn primary scan-btn">&#11088; Upgrade — $2.99/mo &middot; unlimited + auto-scan</button>
+        <p class="sub">Unlimited scans, automatic detection as you read, cancel anytime.</p>
+      ` : ''}
+    </div>
+  `;
+  wireUpgradeButton(document.getElementById('upgrade-btn'));
+}
+
+// Small footer meter under results for free users ("7 of 10 left · Upgrade").
+function quotaFooterHTML(billing) {
+  if (!billing || billing.premium || !billing.metered) return '';
+  const left = scansLeft(billing);
+  const upgrade = billing.upgrade_available
+    ? ' &middot; <button id="quota-upgrade-link" class="linklike">Upgrade</button>' : '';
+  return `<p class="quota-footer">${left} of ${billing.limit} free scans left this week${upgrade}</p>`;
+}
+
 function renderNoEvent(reason) {
   mainContent.innerHTML = `
     <div class="empty-view">
@@ -686,8 +796,10 @@ function renderNoEvent(reason) {
       <p>No scheduling information found in this email.</p>
       <p class="sub">Open an email that mentions a meeting, appointment, or event.</p>
       <button id="copy-debug-btn" class="dismiss-link">Missed something? Copy scan details</button>
+      ${quotaFooterHTML(currentState.billing)}
     </div>
   `;
+  wireUpgradeButton(document.getElementById('quota-upgrade-link'));
 
   // Copies exactly what was scanned (subject/sender/body as sent to the
   // backend) so a missed detection can be reproduced instead of guessed at.

@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 
 import auth
 import availability
+import billing
 import composer
 from email_cleaner import clean_email
 from extractor import extract_event
@@ -167,6 +168,16 @@ def extract_event_route():
     if denied:
         return denied
 
+    # Freemium quota — each extraction consumes one scan (the Claude call is
+    # the cost). Only metered for authenticated users (i.e. production).
+    # 402 tells the extension to show the "out of free scans / upgrade" view.
+    quota = None
+    user_id = getattr(g, 'gg_user', None)
+    if user_id:
+        quota = billing.check_and_increment(user_id, email=auth.user_email(user_id))
+        if not quota['allowed']:
+            return jsonify({'error': 'Out of free scans for this week', 'quota': quota}), 402
+
     data = request.get_json(silent=True)
 
     if not data:
@@ -185,6 +196,8 @@ def extract_event_route():
 
     try:
         event = extract_event(subject=subject, body=cleaned_body, sender=sender, today=today)
+        if quota:
+            event['quota'] = quota  # popup renders the "x of 10 left" meter
         return jsonify(event), 200
 
     except ValueError as exc:
@@ -361,6 +374,84 @@ def availability_recommend_route():
         'reply_subject': reply['reply_subject'],
         'reply_body': reply['reply_body'],
     }), 200
+
+
+# ── Billing (freemium) ────────────────────────────────────────────────────────
+# Free tier: FREE_SCANS_PER_WEEK extractions/week per Google account (metered in
+# Firestore by billing.py). Premium: Stripe monthly subscription → unlimited.
+# The webhook is the only unauthenticated route — it is verified by Stripe's
+# signature instead of the origin/Google gate.
+
+@app.route('/billing/status', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
+def billing_status_route():
+    """Current quota/premium state for the signed-in user (no scan consumed)."""
+    denied = _request_gate()
+    if denied:
+        return denied
+    user_id = getattr(g, 'gg_user', None)
+    if not user_id:
+        # Dev mode (auth disabled): report unlimited so the flow stays usable.
+        return jsonify(billing._status_dict(True, True, 0, metered=False)), 200
+    return jsonify(billing.quota_status(user_id)), 200
+
+
+@app.route('/billing/checkout', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
+def billing_checkout_route():
+    """Create a Stripe Checkout session; the extension opens the returned URL."""
+    denied = _request_gate()
+    if denied:
+        return denied
+    if not billing.stripe_enabled():
+        return jsonify({'error': 'Upgrades are not available yet'}), 503
+    user_id = getattr(g, 'gg_user', None)
+    if not user_id:
+        return jsonify({'error': 'Google sign-in required'}), 401
+    try:
+        url = billing.create_checkout_url(user_id, email=auth.user_email(user_id))
+        return jsonify({'url': url}), 200
+    except Exception as exc:
+        app.logger.error('Stripe checkout failed: %s', exc)
+        return jsonify({'error': 'Could not start checkout — try again later'}), 502
+
+
+@app.route('/billing/portal', methods=['POST', 'OPTIONS'])
+@limiter.limit(RATE_LIMITS, key_func=_rate_key, exempt_when=_is_preflight)
+def billing_portal_route():
+    """Stripe customer-portal URL so subscribers can manage/cancel."""
+    denied = _request_gate()
+    if denied:
+        return denied
+    if not billing.stripe_enabled():
+        return jsonify({'error': 'Billing is not configured'}), 503
+    user_id = getattr(g, 'gg_user', None)
+    if not user_id:
+        return jsonify({'error': 'Google sign-in required'}), 401
+    try:
+        url = billing.create_portal_url(user_id)
+    except Exception as exc:
+        app.logger.error('Stripe portal failed: %s', exc)
+        return jsonify({'error': 'Could not open the billing portal'}), 502
+    if not url:
+        return jsonify({'error': 'No subscription found for this account'}), 404
+    return jsonify({'url': url}), 200
+
+
+@app.route('/billing/webhook', methods=['POST'])
+@limiter.exempt
+def billing_webhook_route():
+    """
+    Stripe → us. Authenticated by the Stripe-Signature header (webhook secret),
+    NOT by the origin/Google gate — Stripe's servers are the caller here.
+    """
+    if not billing.stripe_enabled():
+        return jsonify({'error': 'Billing is not configured'}), 503
+    ok = billing.handle_webhook(
+        request.get_data(), request.headers.get('Stripe-Signature', ''))
+    if not ok:
+        return jsonify({'error': 'Invalid signature'}), 400
+    return jsonify({'received': True}), 200
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -54,6 +54,12 @@
       The requested scopes are <code>openid</code>, <code>email</code>, and
       <code>https://www.googleapis.com/auth/calendar.events</code> (create/edit and view calendar
       events).</li>
+    <li><strong>Usage and subscription records.</strong> To operate the free tier and Premium
+      subscriptions, we store per-account: your email address, a weekly count of how many scans
+      you have used, whether you have an active Premium subscription, and (for subscribers) your
+      Stripe customer/subscription identifiers. We never see or store your payment card details —
+      payments are processed entirely by <strong>Stripe</strong> (see
+      <a href="https://stripe.com/privacy">Stripe's privacy policy</a>).</li>
   </ul>
 
   <h2>How your data is used and shared</h2>
@@ -83,7 +89,9 @@
     <li><strong>Server side:</strong> The GmailGenie backend processes email text and busy/free
       intervals in memory to fulfill a single request and <strong>does not store or log the
       content of your emails or your calendar data</strong>. Nothing about the message or your
-      schedule is persisted after the response is returned.</li>
+      schedule is persisted after the response is returned. The only per-account data kept is
+      the usage/subscription record above (email, weekly scan count, subscription status),
+      which is deleted on request.</li>
     <li><strong>On your device:</strong> Detected events and your extension settings are stored
       locally in the browser (<code>chrome.storage.local</code>) so the popup can display them.
       This data stays on your device and is cleared when you navigate away, dismiss it, or remove

@@ -351,13 +351,37 @@ is effectively free until real scale.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/extract-event` | Takes email text, returns extracted events + `availability_request` |
+| POST | `/extract-event` | Takes email text, returns extracted events + `availability_request` (+ `quota` when metered; 402 when out of free scans) |
 | POST | `/availability/options` | Takes busy blocks + local now, returns free days/buckets (no AI call) |
 | POST | `/availability/recommend` | Takes busy blocks + chosen day/bucket, returns exact slot + drafted reply |
+| POST | `/billing/status` | Signed-in user's quota/premium state (no scan consumed) |
+| POST | `/billing/checkout` | Stripe Checkout URL for the monthly subscription |
+| POST | `/billing/portal` | Stripe customer-portal URL (manage/cancel) |
+| POST | `/billing/webhook` | Stripe → us; verified by Stripe signature, NOT the usual gate |
 | GET | `/health` | Health check — returns 200 if server is running |
 
-All POST routes share the same guard stack (origin allowlist → per-user Google
-auth → rate limit) via `_request_gate()` in `app.py`.
+All POST routes except the Stripe webhook share the same guard stack (origin
+allowlist → per-user Google auth → rate limit) via `_request_gate()` in `app.py`.
+
+## Freemium model
+
+- **Free:** `FREE_SCANS_PER_WEEK` (env, default 10) extractions per Google
+  account per ISO week (UTC, resets Monday). Free users scan MANUALLY — the
+  popup shows "Scan this email · x of 10 left"; auto-scan is gated client-side
+  in `background.js` on the cached `/billing/status`.
+- **Premium:** $2.99/month via Stripe Checkout → unlimited scans + auto-scan.
+  `RATE_LIMITS` (30/min, 300/day) stays as the abuse ceiling.
+- **Where things live:** quota rule = `billing._apply_scan` (pure, tested in
+  `tests/test_billing.py`); state = Firestore (`users/{google_sub}`,
+  `stripe_customers/{customer_id}`); Stripe webhook flips `premium`.
+- **Degradation is deliberate:** Firestore down → scans allowed un-metered;
+  Stripe env unset → quota enforced but no upgrade offered (503 from
+  checkout/portal, popup hides Upgrade buttons).
+- **Env:** `FREE_SCANS_PER_WEEK`, `STRIPE_SECRET_KEY` (Secret Manager),
+  `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` (Secret Manager),
+  `BILLING_RETURN_URL` (default `https://getgenie-mail.xyz/upgraded.html`).
+- To comp an account (e.g. the founder), set `premium: true` on
+  `users/{google_sub}` in Firestore.
 
 **Note:** calendar creation is **not** a backend endpoint. It runs entirely in the Chrome
 extension via `chrome.identity` + the Google Calendar API (see the "New behaviour" section under

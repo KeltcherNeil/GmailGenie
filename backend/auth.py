@@ -34,6 +34,10 @@ _TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo'
 _cache: dict[str, tuple[str, float]] = {}
 _CACHE_MAX = 2000
 
+# user_id -> email, learned from tokeninfo. Used to prefill Stripe checkout.
+# Same bound rationale as _cache.
+_emails: dict[str, str] = {}
+
 
 def auth_enabled() -> bool:
     """True when a client id is configured and tokens must be verified."""
@@ -86,7 +90,19 @@ def verify_token(token: str) -> str | None:
         _cache.clear()
     # Cache until 60s before the token expires (or 5 min if expiry is unknown).
     _cache[token] = (user_id, (exp - 60) if exp else now + 300)
+
+    email = (info.get('email') or '').strip()
+    if email:
+        if len(_emails) >= _CACHE_MAX:
+            _emails.clear()
+        _emails[user_id] = email
+
     return user_id
+
+
+def user_email(user_id: str) -> str:
+    """Best-effort email for a verified user id ('' if not seen this process)."""
+    return _emails.get(user_id, '')
 
 
 def _tokeninfo(token: str) -> dict | None:
