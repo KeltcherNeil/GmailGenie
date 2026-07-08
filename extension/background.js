@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.6.0)');
+console.log('[GmailGenie] background service worker loaded (availability-wizard build, v1.6.1)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -174,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   } else if (message.type === 'OPEN_EDITOR') {
-    openEditor();
+    openEditor(message.autoStart);
   }
   return false;
 });
@@ -206,7 +206,13 @@ async function connectGoogleAndRescan() {
 // Open the editable "main pop up". Prefer the real toolbar popup
 // (chrome.action.openPopup, Chrome 127+); fall back to a small popup window
 // showing the same editable UI when that call isn't available/allowed.
-async function openEditor() {
+// autoStart: the floating card's "Pick a time" was clicked — flag (with a
+// timestamp so a stale flag can't fire later) that the popup should skip the
+// wizard intro and go straight to checking the calendar.
+async function openEditor(autoStart) {
+  if (autoStart) {
+    await chrome.storage.local.set({ wizardAutoStart: Date.now() });
+  }
   try {
     if (chrome.action.openPopup) {
       await chrome.action.openPopup();

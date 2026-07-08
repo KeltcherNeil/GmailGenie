@@ -11,10 +11,22 @@ const settingsBtn    = document.getElementById('settings-btn');
 async function init() {
   const data = await chrome.storage.local.get([
     'status', 'events', 'availability', 'error', 'emailData', 'notificationMode',
-    'processingStartedAt', 'availabilityEnabled'
+    'processingStartedAt', 'availabilityEnabled', 'wizardAutoStart'
   ]);
   currentState = data;
   render(data);
+
+  // Arrived via the floating card's "Pick a time"? Skip the wizard intro and
+  // check the calendar right away. The flag is single-use and expires so a
+  // stale one can't hijack a later, unrelated popup open.
+  if (data.wizardAutoStart) {
+    chrome.storage.local.remove('wizardAutoStart');
+    const availability = (data.availabilityEnabled !== false) ? data.availability : null;
+    if (availability && data.status === 'done' &&
+        Date.now() - data.wizardAutoStart < 30000 && wiz.step === 'intro') {
+      startWizardSearch(availability);
+    }
+  }
 
   // Set the saved notification mode radio
   const savedMode = data.notificationMode || 'none';
@@ -488,35 +500,41 @@ function wizardFail(msg) {
   rerenderWizard();
 }
 
+// Read the calendar and show the day choices. Triggered by the intro's
+// "Find a time" button, or immediately on popup open when the user arrived
+// via the floating card's "Pick a time" (wizardAutoStart flag).
+async function startWizardSearch(availability) {
+  wiz.availability = availability;
+  wiz.step = 'loading';
+  wiz.loadingText = 'Checking your calendar…';
+  rerenderWizard();
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage({
+      type: 'AVAILABILITY_OPTIONS',
+      durationMinutes: availability.duration_minutes || 60,
+      preferredDates: availability.preferred_dates || [],
+      preferredTime: availability.preferred_time || '',
+    });
+  } catch (err) {
+    result = { ok: false, error: err.message };
+  }
+  if (!result || !result.ok) return wizardFail(result && result.error);
+  if (!result.days.length) { wiz.step = 'nodays'; return rerenderWizard(); }
+  wiz.days = result.days;
+  wiz.busy = result.busy;
+  wiz.unavailablePreferred = result.unavailablePreferred || [];
+  wiz.step = 'day';
+  rerenderWizard();
+}
+
 function wireWizard(availability) {
   wiz.availability = availability;
   const block = mainContent.querySelector('.wiz-block');
   if (!block) return;
 
   // Step 0 → fetch day options (reads the calendar; may show Google consent once).
-  block.querySelector('#wiz-start')?.addEventListener('click', async () => {
-    wiz.step = 'loading';
-    wiz.loadingText = 'Checking your calendar…';
-    rerenderWizard();
-    let result;
-    try {
-      result = await chrome.runtime.sendMessage({
-        type: 'AVAILABILITY_OPTIONS',
-        durationMinutes: availability.duration_minutes || 60,
-        preferredDates: availability.preferred_dates || [],
-        preferredTime: availability.preferred_time || '',
-      });
-    } catch (err) {
-      result = { ok: false, error: err.message };
-    }
-    if (!result || !result.ok) return wizardFail(result && result.error);
-    if (!result.days.length) { wiz.step = 'nodays'; return rerenderWizard(); }
-    wiz.days = result.days;
-    wiz.busy = result.busy;
-    wiz.unavailablePreferred = result.unavailablePreferred || [];
-    wiz.step = 'day';
-    rerenderWizard();
-  });
+  block.querySelector('#wiz-start')?.addEventListener('click', () => startWizardSearch(availability));
 
   // Step 1 → day chosen.
   block.querySelectorAll('.chip[data-day]').forEach((chip) => {

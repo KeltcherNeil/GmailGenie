@@ -465,7 +465,9 @@ function showAvailabilityCard(availability) {
   document.body.appendChild(card);
   document.getElementById('gg-close').addEventListener('click', removeCard);
   document.getElementById('gg-pick-time').addEventListener('click', () => {
-    safeSendMessage({ type: 'OPEN_EDITOR' });
+    // autoStart: the click already expressed intent — the popup should open
+    // straight into the day choices, not show another "Find a time" button.
+    safeSendMessage({ type: 'OPEN_EDITOR', autoStart: true });
     removeCard();
   });
 }
