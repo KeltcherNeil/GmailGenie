@@ -254,7 +254,7 @@ do not pass `--set-env-vars` unless you intend to replace the whole set.
 | Service / region | `gmailgenie` / `us-central1` |
 | URL | `https://gmailgenie-485353812643.us-central1.run.app` |
 | Anthropic key | Secret Manager secret `anthropic-key` (not a plain env var) |
-| `ALLOWED_ORIGINS` | `chrome-extension://mhcloobbehmmanfjdcejglmndcogejjp` |
+| `ALLOWED_ORIGINS` | `chrome-extension://gfdpjndkpcifmaacikfmldjmlmmocehe` (the published store ID) |
 
 **Verify a deploy:**
 ```bash
@@ -267,17 +267,24 @@ See `backend/DEPLOY.md` for first-time setup, secrets, and hardening.
 ## Publishing to the Chrome Web Store (launch checklist)
 
 Detailed final steps to take GmailGenie from "works for test users" to a public
-install. **Current state (2026-07-07):**
+install. **Current state (2026-07-10): PUBLISHED — public on the Chrome Web Store.**
 
 - Everything lives in GCP project **`gmailgenie-neil-4821`** (owner `n87821395@gmail.com`).
 - OAuth client **`485353812643-d4sfmug4qjl03sk13dljbhkq0sojk4vf.apps.googleusercontent.com`**
-  (type Chrome Extension), set in `manifest.json` `oauth2.client_id` and backend `GOOGLE_CLIENT_ID`.
-- Stable dev extension ID **`hlhkdgonhlbhpbgmocoifmhineflnlkk`** (pinned by the `key` in
-  `manifest.json`; private key `extension-key.pem`, gitignored).
+  (type Chrome Extension), set in `manifest.json` `oauth2.client_id` and backend
+  `GOOGLE_CLIENT_ID`. Its **Item ID** is set to the published extension ID.
+- **Extension ID `gfdpjndkpcifmaacikfmldjmlmmocehe`** — the published Chrome Web Store ID.
+  The `key` in `manifest.json` is the store item's public key, so the unpacked dev build
+  gets the SAME ID as the store version: OAuth, `ALLOWED_ORIGINS`, and dev/prod all stay
+  aligned. (The old dev ID `hlhkdgon…` and `extension-key.pem` are obsolete. Don't load
+  the unpacked build and the store install in the same Chrome profile — same ID, they
+  conflict.)
 - Custom domain **`getgenie-mail.xyz`** (Porkbun) → GitHub Pages, HTTPS enforced.
   Home `https://getgenie-mail.xyz/`, privacy `https://getgenie-mail.xyz/privacy.html`.
   Verified in Google Search Console.
-- Backend enforces per-user Google auth; app OAuth status is **Testing** (test users only).
+- Backend enforces per-user Google auth; app OAuth status is **Testing** (test users only)
+  while scope verification is pending. Until verification clears, every real user must be
+  added under **Audience → Test users**; after it clears, hit **Audience → Publish app**.
 
 ### Step 1 — Finish OAuth consent + verification  *(in progress)*
 1. Console → **APIs & Services → OAuth consent screen** (a.k.a. Google Auth Platform),
@@ -295,33 +302,30 @@ install. **Current state (2026-07-07):**
    flow + the extension creating a calendar event. Reply with it.
 7. **Wait:** sensitive-scope verification typically takes a few days to ~2 weeks.
 
-### Step 2 — Package the extension
+### Step 2 — Package the extension  *(recurring — every store update)*
 ```bash
-cd extension && zip -r ../gmailgenie-<version>.zip . -x '.*'
+cd extension && zip -r ../gmailgenie-store-<version>.zip . -x '.*'
 ```
 - Bump `manifest.json` `version` for every upload (the store rejects duplicate versions).
-- **`key` caveat:** the manifest currently pins a `key` for a stable *dev* ID. The Web Store
-  assigns its **own** ID on first upload, which will differ from `hlhkdgon…` unless you
-  deliberately keep the same key. Simplest path: upload as-is, note the **published ID** the
-  store assigns, then reconcile in Step 4.
+- The `key` in the manifest is the store item's public key — the Web Store ignores it on
+  upload, and it keeps the local unpacked build on the same ID. Leave it in.
+- Upload at the dashboard → GmailGenie → Package → **Upload new package** → submit for
+  review. Updates to a published item usually review faster than the first submission.
+  Users' browsers auto-update within a few hours of publish.
 
-### Step 3 — Chrome Web Store submission
-1. Register a **Chrome Web Store developer account** — one-time **$5** fee
-   (https://chrome.google.com/webstore/devconsole).
-2. Create item → upload the zip → fill the listing (copy in `STORE_LISTING.md` §2),
-   **Privacy practices** disclosures (§4), and screenshots.
-3. Submit for review. Extension review (separate from OAuth verification) is usually hours
-   to a few days.
+### Step 3 — Chrome Web Store submission  *(✅ done 2026-07-10 — v1.7.2 published public)*
+1. ~~Register a **Chrome Web Store developer account** — one-time **$5** fee~~ done.
+2. ~~Create item → upload the zip → fill the listing, privacy disclosures, screenshots.~~
+   Listing marked **Contains in-app purchases** (Stripe Premium tier).
+3. Review took ~1 day.
 
-### Step 4 — Post-publish reconciliation  *(CRITICAL — do immediately after publish)*
-The store assigns a new extension ID. Then:
-1. Console → **Clients** → edit the OAuth client → set **Item ID** to the published ID.
-2. Update backend `ALLOWED_ORIGINS=chrome-extension://<published-id>` and redeploy:
-   ```bash
-   gcloud run deploy gmailgenie --source backend --region us-central1 \
-     --update-env-vars "ALLOWED_ORIGINS=chrome-extension://<published-id>"
-   ```
-3. Install from the store → Connect Google → confirm extraction + event creation work.
+### Step 4 — Post-publish reconciliation  *(✅ done 2026-07-10)*
+All three IDs now agree on `gfdpjndkpcifmaacikfmldjmlmmocehe`:
+1. OAuth client **Item ID** → set to the published ID. *(Item ID edits can take
+   5 min–hours to propagate; "bad client id" right after a change is normal.)*
+2. Backend `ALLOWED_ORIGINS` → `chrome-extension://gfdpjndkpcifmaacikfmldjmlmmocehe`.
+3. `manifest.json` `key` → the store item's public key (Package page → Public key), so
+   the dev build shares the published ID. Verified: extraction + event creation work.
 
 ---
 

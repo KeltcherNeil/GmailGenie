@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.2)');
+console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.3)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -14,6 +14,22 @@ const BACKEND_URL = 'https://gmailgenie-485353812643.us-central1.run.app';
 
 // Track the latest processing job to ignore stale results when emails change quickly
 let currentJobId = null;
+
+// Chrome only auto-injects content.js into Gmail tabs that load AFTER install.
+// Any Gmail tab already open at install/update time is left with no content
+// script until the user manually reloads it — which they don't know to do, and
+// to them the extension just "doesn't work". Fix: inject it ourselves into any
+// already-open Gmail tabs as soon as we're installed or updated.
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({ url: 'https://mail.google.com/*' }, (tabs) => {
+    for (const tab of tabs) {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      }).catch(() => {}); // e.g. a tab mid-navigation; it'll get the script on next load anyway
+    }
+  });
+});
 
 // Google Calendar API — the extension writes events directly using the user's
 // own OAuth token (obtained via chrome.identity). No backend server involved.
