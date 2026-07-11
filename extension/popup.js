@@ -833,8 +833,22 @@ function renderIdle() {
   document.getElementById('scan-now-btn').addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) return;
-    chrome.tabs.sendMessage(tab.id, { type: 'SCAN_NOW' }, () => {
-      void chrome.runtime.lastError; // silently ignore if content script not ready
+    chrome.tabs.sendMessage(tab.id, { type: 'SCAN_NOW' }, async () => {
+      if (!chrome.runtime.lastError) return;
+      // No content script in the tab (e.g. Gmail was already open when the
+      // extension was installed). Inject it now and ask again, instead of
+      // leaving the user staring at a spinner that can never finish.
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js']
+        });
+        chrome.tabs.sendMessage(tab.id, { type: 'SCAN_NOW' }, () => {
+          void chrome.runtime.lastError;
+        });
+      } catch {
+        renderError('Open a Gmail tab (mail.google.com), then try scanning again.');
+      }
     });
     renderProcessing();
   });

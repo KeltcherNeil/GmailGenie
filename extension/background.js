@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.3)');
+console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.4)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -309,14 +309,48 @@ function getAuthTokenSilent() {
 // Interactive Google sign-in, then re-extract the stored email so the popup
 // updates from "connect" to the detected events.
 async function connectGoogleAndRescan() {
+  let token;
   try {
-    await getAuthToken(true);
+    token = await getAuthToken(true);
   } catch (err) {
     return { ok: false, error: `Google sign-in failed or was cancelled: ${err.message}` };
   }
+
+  // Google puts the calendar permission on its own consent page as an UNCHECKED
+  // checkbox, so users routinely click Continue without ticking it — sign-in
+  // "succeeds" but every later calendar call would fail cryptically. Catch it
+  // here, drop the partial token, and tell the user exactly what to re-do.
+  if (!(await tokenHasCalendarScope(token))) {
+    await removeCachedToken(token);
+    return {
+      ok: false,
+      error: 'Almost there — GmailGenie needs calendar access to add events. ' +
+             'Click Connect again and tick the "View and edit events on all your calendars" checkbox.'
+    };
+  }
+
   const { emailData } = await chrome.storage.local.get('emailData');
   if (emailData) handleEmailOpened(emailData);
   return { ok: true };
+}
+
+// True when the token was granted the Calendar scope. Checked right after the
+// interactive consent, where the calendar checkbox can be left unticked. Fails
+// OPEN (returns true) when tokeninfo itself is unreachable — a verification
+// hiccup shouldn't block sign-in; worst case the user hits the old behavior.
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+async function tokenHasCalendarScope(token) {
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return true;
+    const data = await res.json();
+    return (data.scope || '').split(' ').includes(CALENDAR_SCOPE);
+  } catch {
+    return true;
+  }
 }
 
 // Open the editable "main pop up". Prefer the real toolbar popup
@@ -470,6 +504,17 @@ async function createCalendarEvent(event) {
 
     if (!res.ok) {
       const msg = data.error?.message || `Calendar API error ${res.status}`;
+      // Signed in, but the calendar checkbox was left unticked at consent
+      // (tokens granted before the connect-time scope check can be missing the
+      // scope). Drop the partial token so retrying re-opens the consent page.
+      if (res.status === 403 && /insufficient/i.test(msg)) {
+        await removeCachedToken(token);
+        return {
+          ok: false,
+          error: 'Google sign-in is missing calendar permission. Try again and tick the ' +
+                 '"View and edit events on all your calendars" checkbox when Google asks.'
+        };
+      }
       console.log('[GmailGenie] event creation failed:', msg);
       return { ok: false, error: msg };
     }
