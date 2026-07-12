@@ -133,7 +133,7 @@ def _evaluate_folder(folder: Path, expect_event: bool) -> dict[str, int]:
 def main() -> None:
     sep = '=' * 56
     print(sep)
-    print('GmailGenie — Extractor Evaluation')
+    print('MailGenie — Extractor Evaluation')
     print(sep)
 
     totals: dict[str, int] = {'correct': 0, 'wrong': 0, 'errors': 0, 'total': 0}

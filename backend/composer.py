@@ -4,7 +4,7 @@ composer.py — Drafts the reply email for an availability request.
 Once availability.py has picked a concrete slot, this module asks Claude to
 write a short, friendly reply proposing that time ("Thursday at 2 works for
 me!"). The draft is shown to the user in a prefilled Gmail compose window —
-GmailGenie never sends email on its own.
+MailGenie never sends email on its own.
 
 The slot itself is ALWAYS the deterministic one from availability.py; Claude
 only writes prose around it. If the API call fails or returns garbage, a plain

@@ -1,9 +1,9 @@
-# GmailGenie
+# MailGenie
 
 A Chrome extension that detects scheduling information in the Gmail email you're
 reading and adds it to Google Calendar in one click — powered by Claude.
 
-Open an email that mentions a meeting, appointment, or match time, and GmailGenie
+Open an email that mentions a meeting, appointment, or match time, and MailGenie
 surfaces the event(s) it found with an editable card. Click **Add to Calendar** and
 it's created on your Google Calendar. Emails with several events return all of them.
 
@@ -66,7 +66,7 @@ origin and auth checks are disabled). See `CLAUDE.md` for the full setup, and
 
 ## Privacy
 
-GmailGenie reads only the email you're actively viewing, does not store email content
+MailGenie reads only the email you're actively viewing, does not store email content
 server-side, and never sells data. See [PRIVACY.md](PRIVACY.md).
 
 ## License

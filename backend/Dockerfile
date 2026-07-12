@@ -1,4 +1,4 @@
-# GmailGenie extraction service — container for Google Cloud Run.
+# MailGenie extraction service — container for Google Cloud Run.
 #
 # Cloud Run injects the PORT env var (default 8080) and expects the process to
 # listen on it. gunicorn imports `app:app` directly, so app.py's __main__ block

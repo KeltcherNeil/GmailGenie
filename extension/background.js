@@ -3,7 +3,7 @@
 // extraction is server-side (see backend/), so the Anthropic key never ships here.
 
 // DIAGNOSTIC: confirms the reloaded worker is running THIS build.
-console.log('[GmailGenie] background service worker loaded (freemium build, v1.7.4)');
+console.log('[MailGenie] background service worker loaded (freemium build, v1.7.5)');
 
 // Hosted extraction service. The backend holds the Anthropic key and returns the
 // extracted event JSON — the extension sends only the email text.
@@ -68,7 +68,7 @@ async function extractEvent(emailData, token) {
     });
   } catch (err) {
     // Network failure — backend unreachable (down, wrong URL, offline).
-    throw new Error('Could not reach the GmailGenie service. Please try again later.');
+    throw new Error('Could not reach the MailGenie service. Please try again later.');
   }
 
   const data = await res.json().catch(() => ({}));
@@ -281,7 +281,7 @@ async function refreshBillingStatus() {
     await chrome.storage.local.set({ billing });
     return billing;
   } catch (err) {
-    console.log('[GmailGenie] billing status unavailable:', err.message);
+    console.log('[MailGenie] billing status unavailable:', err.message);
     return null;
   }
 }
@@ -324,7 +324,7 @@ async function connectGoogleAndRescan() {
     await removeCachedToken(token);
     return {
       ok: false,
-      error: 'Almost there — GmailGenie needs calendar access to add events. ' +
+      error: 'Almost there — MailGenie needs calendar access to add events. ' +
              'Click Connect again and tick the "View and edit events on all your calendars" checkbox.'
     };
   }
@@ -366,11 +366,11 @@ async function openEditor(autoStart) {
   try {
     if (chrome.action.openPopup) {
       await chrome.action.openPopup();
-      console.log('[GmailGenie] opened toolbar popup for editing');
+      console.log('[MailGenie] opened toolbar popup for editing');
       return;
     }
   } catch (err) {
-    console.log('[GmailGenie] openPopup failed, opening window instead:', err.message);
+    console.log('[MailGenie] openPopup failed, opening window instead:', err.message);
   }
   chrome.windows.create({
     url: chrome.runtime.getURL('popup.html'),
@@ -421,7 +421,7 @@ function nextDay(dateStr) {
 // Ported from backend/calendar_helper.py:build_event_body.
 function buildEventBody(event) {
   const tz = userTimeZone();
-  const body = { summary: event.title || 'Event from GmailGenie' };
+  const body = { summary: event.title || 'Event from MailGenie' };
 
   const date = event.date;
   const time = event.time;
@@ -478,13 +478,13 @@ async function insertEvent(token, body) {
 }
 
 async function createCalendarEvent(event) {
-  console.log('[GmailGenie] creating calendar event via chrome.identity', event);
+  console.log('[MailGenie] creating calendar event via chrome.identity', event);
 
   let token;
   try {
     token = await getAuthToken(true);
   } catch (err) {
-    console.log('[GmailGenie] Google sign-in failed:', err.message);
+    console.log('[MailGenie] Google sign-in failed:', err.message);
     return { ok: false, error: `Google sign-in failed or was cancelled: ${err.message}` };
   }
 
@@ -515,14 +515,14 @@ async function createCalendarEvent(event) {
                  '"View and edit events on all your calendars" checkbox when Google asks.'
         };
       }
-      console.log('[GmailGenie] event creation failed:', msg);
+      console.log('[MailGenie] event creation failed:', msg);
       return { ok: false, error: msg };
     }
 
-    console.log('[GmailGenie] event created', data.htmlLink);
+    console.log('[MailGenie] event created', data.htmlLink);
     return { ok: true, htmlLink: data.htmlLink, id: data.id };
   } catch (err) {
-    console.log('[GmailGenie] event creation request failed:', err.message);
+    console.log('[MailGenie] event creation request failed:', err.message);
     return { ok: false, error: `Could not reach Google Calendar: ${err.message}` };
   }
 }
@@ -612,7 +612,7 @@ async function backendPost(path, payload, token) {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    throw new Error('Could not reach the GmailGenie service. Please try again later.');
+    throw new Error('Could not reach the MailGenie service. Please try again later.');
   }
 
   const data = await res.json().catch(() => ({}));

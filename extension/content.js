@@ -35,11 +35,11 @@ function getGmailBodyEl() {
     // Require the element to be visible — Gmail caches hidden .a3s elements
     // in the DOM when the user returns to the inbox, which would cause false triggers
     if (el && el.innerText.trim().length > 10 && isVisible(el)) {
-      console.log('[GmailGenie] body found via selector:', sel);
+      console.log('[MailGenie] body found via selector:', sel);
       return el;
     }
   }
-  console.log('[GmailGenie] no body element found — tried:', selectors.join(', '));
+  console.log('[MailGenie] no body element found — tried:', selectors.join(', '));
   return null;
 }
 
@@ -69,7 +69,7 @@ function getGmailContent() {
 
 function checkForEmailChange() {
   const currentId = getGmailEmailId();
-  console.log('[GmailGenie] check — id:', currentId, 'last:', lastEmailId);
+  console.log('[MailGenie] check — id:', currentId, 'last:', lastEmailId);
 
   if (!currentId) {
     // Not in an email view — reset so the popup shows idle state
@@ -232,8 +232,8 @@ function showEventCard(events) {
   const list  = Array.isArray(events) ? events : [events];
   const count = list.length;
   const heading = count === 1
-    ? '&#128197; GmailGenie detected an event'
-    : `&#128197; GmailGenie detected ${count} events`;
+    ? '&#128197; MailGenie detected an event'
+    : `&#128197; MailGenie detected ${count} events`;
 
   const card = document.createElement('div');
   card.id = CARD_ID;
@@ -458,7 +458,7 @@ function showAvailabilityCard(availability) {
       <button class="gg-x" id="gg-close">&#10005;</button>
     </div>
     <div class="gg-body">
-      <div class="gg-text">${esc(availability.requester_name || 'The sender')} asked when you can <b>${esc(availability.activity)}</b>. GmailGenie can check your calendar and suggest a time.</div>
+      <div class="gg-text">${esc(availability.requester_name || 'The sender')} asked when you can <b>${esc(availability.activity)}</b>. MailGenie can check your calendar and suggest a time.</div>
       <button class="gg-btn" id="gg-pick-time">Pick a time</button>
     </div>
   `;
@@ -494,7 +494,7 @@ chrome.storage.onChanged.addListener((_, area) => {
 // Allow the popup to manually trigger a scan (bypasses debounce + resets lastEmailId)
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'SCAN_NOW') {
-    console.log('[GmailGenie] manual scan triggered');
+    console.log('[MailGenie] manual scan triggered');
     clearTimeout(debounceTimer);
     lastEmailId = null; // force re-detection even if same email
     checkForEmailChange();

@@ -1,8 +1,8 @@
-# GmailGenie — Claude Code Project Guide
+# MailGenie — Claude Code Project Guide
 
 ## Project Overview
 
-GmailGenie is a Chrome extension that reads Gmail emails and automatically suggests Google Calendar events using AI. When a user opens an email containing scheduling information, the extension detects it and offers a one-click button to add the event to their calendar.
+MailGenie is a Chrome extension that reads Gmail emails and automatically suggests Google Calendar events using AI. When a user opens an email containing scheduling information, the extension detects it and offers a one-click button to add the event to their calendar.
 
 The project is split into two parts:
 - **Chrome Extension** (JavaScript) — reads Gmail DOM, shows popup UI, creates calendar events
@@ -243,7 +243,7 @@ Existing env vars and the `anthropic-key` secret are **preserved** across deploy
 do not pass `--set-env-vars` unless you intend to replace the whole set.
 
 **2. Reload the extension** — for any change under `extension/`:
-`chrome://extensions` → GmailGenie → ↻ reload → reopen the email (or click
+`chrome://extensions` → MailGenie → ↻ reload → reopen the email (or click
 "Scan current email" in the popup).
 
 **Deployed service (current):**
@@ -266,7 +266,7 @@ See `backend/DEPLOY.md` for first-time setup, secrets, and hardening.
 
 ## Publishing to the Chrome Web Store (launch checklist)
 
-Detailed final steps to take GmailGenie from "works for test users" to a public
+Detailed final steps to take MailGenie from "works for test users" to a public
 install. **Current state (2026-07-10): PUBLISHED — public on the Chrome Web Store.**
 
 - Everything lives in GCP project **`gmailgenie-neil-4821`** (owner `n87821395@gmail.com`).
@@ -289,7 +289,7 @@ install. **Current state (2026-07-10): PUBLISHED — public on the Chrome Web St
 ### Step 1 — Finish OAuth consent + verification  *(in progress)*
 1. Console → **APIs & Services → OAuth consent screen** (a.k.a. Google Auth Platform),
    project `gmailgenie-neil-4821`.
-2. **Branding:** App name `GmailGenie`; support email; App home page
+2. **Branding:** App name `MailGenie`; support email; App home page
    `https://getgenie-mail.xyz/`; Privacy policy `https://getgenie-mail.xyz/privacy.html`;
    **Authorized domains:** `getgenie-mail.xyz`.
 3. **Data Access:** scopes `openid`, `email`, `.../auth/calendar.events`.
@@ -309,7 +309,7 @@ cd extension && zip -r ../gmailgenie-store-<version>.zip . -x '.*'
 - Bump `manifest.json` `version` for every upload (the store rejects duplicate versions).
 - The `key` in the manifest is the store item's public key — the Web Store ignores it on
   upload, and it keeps the local unpacked build on the same ID. Leave it in.
-- Upload at the dashboard → GmailGenie → Package → **Upload new package** → submit for
+- Upload at the dashboard → MailGenie → Package → **Upload new package** → submit for
   review. Updates to a published item usually review faster than the first submission.
   Users' browsers auto-update within a few hours of publish.
 
@@ -427,7 +427,7 @@ tests/test_emails/has_event/email_001_expected.json  # expected extraction outpu
 ### 1. Calendar tab does not auto-close / return to email after saving
 
 **Status:** ✅ Superseded — the whole "open a Google Calendar tab and click Save" flow was
-removed. GmailGenie now creates the event directly via the Google Calendar API, so there is no
+removed. MailGenie now creates the event directly via the Google Calendar API, so there is no
 calendar tab to close and no manual Save step. See the new flow below.
 
 **Old behaviour (removed):**
@@ -504,7 +504,7 @@ booked day or part of day is **never offered**:
 3. **Recommendation** — the earliest free slot (30-min grid) in that bucket,
    plus a Claude-drafted reply. Buttons: **Add to Calendar** (existing
    `CREATE_EVENT` path) and **Reply in Gmail** (opens a prefilled compose
-   window — GmailGenie never sends email itself).
+   window — MailGenie never sends email itself).
 
 **Where the pieces live:**
 

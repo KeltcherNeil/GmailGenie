@@ -418,7 +418,7 @@ function buildWizard(availability) {
       // there — say so up front, before the user even picks a bucket.
       const conflict = (day.asked_time_free === false && availability.preferred_time)
         ? `<p class="wiz-notice">&#9888;&#65039; They asked for ${esc(formatTime(availability.preferred_time))},
-             but you have a conflict then — GmailGenie will suggest the closest free time.</p>`
+             but you have a conflict then — MailGenie will suggest the closest free time.</p>`
         : '';
       body = `
         <p class="wiz-question">What time of day on ${esc(day.label)}?</p>
@@ -507,7 +507,7 @@ function buildWizard(availability) {
       body = `
         <p class="wiz-text"><b>${esc(who)}</b> asked when you can <b>${esc(activityLabel(availability))}</b>.</p>
         <button id="wiz-start" class="btn primary full-width">&#128197; Find a time</button>
-        <p class="wiz-hint">GmailGenie checks your calendar and only suggests times you're actually free.</p>
+        <p class="wiz-hint">MailGenie checks your calendar and only suggests times you're actually free.</p>
       `;
   }
 
@@ -797,9 +797,9 @@ function renderAuthRequired() {
   mainContent.innerHTML = `
     <div class="empty-view">
       <div class="empty-icon">&#128273;</div>
-      <p>Connect your Google account to let GmailGenie scan this email and add events to your calendar.</p>
+      <p>Connect your Google account to let MailGenie scan this email and add events to your calendar.</p>
       <button id="connect-google-btn" class="btn primary">Connect Google Account</button>
-      <p class="sub">You only need to do this once. GmailGenie uses your account solely to read the open email and create events you approve.</p>
+      <p class="sub">You only need to do this once. MailGenie uses your account solely to read the open email and create events you approve.</p>
     </div>
   `;
 

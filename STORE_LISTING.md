@@ -20,7 +20,7 @@ versions).
 
 ## 2. Store listing copy
 
-**Name:** GmailGenie
+**Name:** MailGenie
 
 **Short description** (≤132 chars):
 > Turn emails into calendar events — and when someone asks "when are you free?", get conflict-free times and a ready-to-send reply.
@@ -28,7 +28,7 @@ versions).
 **Category:** Productivity
 
 **Detailed description:**
-> GmailGenie reads the email you're currently viewing in Gmail and detects any
+> MailGenie reads the email you're currently viewing in Gmail and detects any
 > meetings, appointments, or events it mentions — then lets you add them to Google
 > Calendar with a single click.
 >
@@ -40,7 +40,7 @@ versions).
 >
 > ANSWER "WHEN ARE YOU FREE?" IN SECONDS
 > When an email asks for YOUR availability ("when can you play tennis?"),
-> GmailGenie checks your calendar and walks you through picking a time:
+> MailGenie checks your calendar and walks you through picking a time:
 > • Suggests days with free time — fully booked days are never offered.
 > • Shows each day's times color-coded: green you're free, red you have a conflict.
 > • Honors what the email asked for ("Friday around noon") and warns you if
@@ -48,13 +48,13 @@ versions).
 > • Drafts a friendly reply proposing the time — you review it in Gmail and
 >   hit Send yourself — and adds the event to your calendar in one click.
 >
-> Your privacy stays intact: GmailGenie only reads the message you have open,
+> Your privacy stays intact: MailGenie only reads the message you have open,
 > reads your calendar only in your browser (only anonymous busy/free times —
 > never event titles or guests — are used to compute suggestions), never stores
 > your email content, and never sells your data. See our privacy policy for details.
 
 **Single-purpose description** (required):
-> GmailGenie detects scheduling information in the Gmail message the user is viewing
+> MailGenie detects scheduling information in the Gmail message the user is viewing
 > and helps the user act on it: creating the corresponding Google Calendar event,
 > or — when the email asks for the user's availability — suggesting conflict-free
 > times from their calendar and drafting a reply for the user to review and send.
@@ -116,7 +116,7 @@ verification.
 | Scope | Why |
 |---|---|
 | `openid`, `email` | Identify the signed-in user so the backend can authorize per-account access and rate-limit (prevents anonymous abuse of the extraction service). |
-| `.../auth/calendar.events` | (1) Create the calendar events the user explicitly approves. (2) Read the start/end times of the user's upcoming events — in the browser — so that when an email asks for the user's availability, GmailGenie only suggests times the user is actually free. Event titles, descriptions, and attendees are never transmitted or stored; only anonymous busy/free intervals are used to compute suggestions. |
+| `.../auth/calendar.events` | (1) Create the calendar events the user explicitly approves. (2) Read the start/end times of the user's upcoming events — in the browser — so that when an email asks for the user's availability, MailGenie only suggests times the user is actually free. Event titles, descriptions, and attendees are never transmitted or stored; only anonymous busy/free intervals are used to compute suggestions. |
 
 **Verification needs:** a verified app homepage + the hosted privacy-policy URL on the
 same domain, an authorized domain, and (Google may request) a short demo video showing
