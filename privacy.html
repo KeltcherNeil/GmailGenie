@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GmailGenie — Privacy Policy</title>
+  <title>MailGenie — Privacy Policy</title>
   <style>
     :root { --ink:#1f2430; --soft:#5b6270; --line:#e6e8ee; --accent:#2575fc; }
     * { box-sizing: border-box; }
@@ -31,10 +31,10 @@
 </head>
 <body>
 <main>
-  <h1>GmailGenie — Privacy Policy</h1>
+  <h1>MailGenie — Privacy Policy</h1>
   <p class="eff"><strong>Effective date:</strong> July 8, 2026</p>
 
-  <p>GmailGenie is a Chrome extension that detects scheduling information in the Gmail
+  <p>MailGenie is a Chrome extension that detects scheduling information in the Gmail
   email you are currently viewing, helps you add it to Google Calendar with one click,
   and — when an email asks for your availability — suggests times you are free and drafts
   a reply for you to review and send. This policy explains what data the extension handles,
@@ -42,12 +42,12 @@
 
   <h2>What data we access</h2>
   <ul>
-    <li><strong>Content of the open email.</strong> When you open an email in Gmail, GmailGenie
+    <li><strong>Content of the open email.</strong> When you open an email in Gmail, MailGenie
       reads that message's subject, body text, and sender address from the page so it can look
       for meetings, appointments, and events. It only reads the message you are actively viewing —
       it does not read your inbox, other messages, contacts, or attachments.</li>
     <li><strong>Your Google account identity and Calendar access.</strong> With your consent,
-      GmailGenie uses Google Sign-In (OAuth) to (a) confirm you are a signed-in user of this
+      MailGenie uses Google Sign-In (OAuth) to (a) confirm you are a signed-in user of this
       extension, (b) create events on your Google Calendar when you click "Add to Calendar,"
       and (c) read the <strong>start and end times</strong> of your upcoming calendar events —
       in your browser — so the availability feature only suggests times you are actually free.
@@ -65,7 +65,7 @@
   <h2>How your data is used and shared</h2>
   <ul>
     <li><strong>Event detection.</strong> The text of the open email is sent over HTTPS to the
-      GmailGenie backend service (hosted on Google Cloud Run, US region), which forwards it to
+      MailGenie backend service (hosted on Google Cloud Run, US region), which forwards it to
       <strong>Anthropic's Claude API</strong> to identify event details (title, date, time,
       location) and, for availability requests, to draft the reply text you review. Anthropic
       processes the text to return that result. See
@@ -73,12 +73,12 @@
     <li><strong>Availability suggestions.</strong> When you use "Find a time," your upcoming
       events are read <strong>in your browser</strong> via the Google Calendar API. Only
       <strong>anonymous busy/free intervals</strong> (start/end timestamps for the next ~2 weeks)
-      are sent to the GmailGenie backend to compute which days and times to offer —
+      are sent to the MailGenie backend to compute which days and times to offer —
       <strong>never event titles, descriptions, locations, or attendees</strong>.</li>
     <li><strong>Calendar event creation.</strong> When you approve an event, it is sent
       <strong>directly from your browser to the Google Calendar API</strong> using your own OAuth
-      token. It does not pass through the GmailGenie backend.</li>
-    <li><strong>Sending replies.</strong> GmailGenie never sends email on your behalf. The drafted
+      token. It does not pass through the MailGenie backend.</li>
+    <li><strong>Sending replies.</strong> MailGenie never sends email on your behalf. The drafted
       reply opens in a Gmail compose window for you to edit and send yourself.</li>
     <li><strong>We do not</strong> sell your data, use it for advertising, or use it to build user
       profiles. There are no third-party analytics or trackers in the extension.</li>
@@ -86,7 +86,7 @@
 
   <h2>Data retention</h2>
   <ul>
-    <li><strong>Server side:</strong> The GmailGenie backend processes email text and busy/free
+    <li><strong>Server side:</strong> The MailGenie backend processes email text and busy/free
       intervals in memory to fulfill a single request and <strong>does not store or log the
       content of your emails or your calendar data</strong>. Nothing about the message or your
       schedule is persisted after the response is returned. The only per-account data kept is
@@ -97,7 +97,7 @@
       This data stays on your device and is cleared when you navigate away, dismiss it, or remove
       the extension.</li>
     <li><strong>Google token:</strong> Your OAuth token is managed and cached by Chrome
-      (<code>chrome.identity</code>) and refreshed automatically; GmailGenie does not store it
+      (<code>chrome.identity</code>) and refreshed automatically; MailGenie does not store it
       separately.</li>
   </ul>
 
@@ -116,7 +116,7 @@
   <p>We may update this policy; the "Effective date" above will change accordingly. Material
   changes will be reflected in the extension's store listing.</p>
 
-  <footer>GmailGenie · <a href="https://github.com/KeltcherNeil/GmailGenie">github.com/KeltcherNeil/GmailGenie</a></footer>
+  <footer>MailGenie · <a href="https://github.com/KeltcherNeil/GmailGenie">github.com/KeltcherNeil/GmailGenie</a></footer>
 </main>
 </body>
 </html>
