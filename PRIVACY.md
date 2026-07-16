@@ -1,6 +1,6 @@
 # MailGenie — Privacy Policy
 
-**Effective date:** July 8, 2026
+**Effective date:** July 16, 2026
 
 MailGenie is a Chrome extension that detects scheduling information in the Gmail
 email you are currently viewing, helps you add it to Google Calendar with one
@@ -49,6 +49,50 @@ the extension handles, where it goes, and how long it is kept.
   opens in a Gmail compose window for you to edit and send yourself.
 - **We do not** sell your data, use it for advertising, or use it to build user
   profiles. There are no third-party analytics or trackers in the extension.
+
+## Who we share Google user data with
+
+"Google user data" means the information MailGenie obtains through Google Sign-In
+and the Google Calendar API — your Google account email address and the start/end
+times of your calendar events — together with the content of the Gmail message you
+have open. We disclose this data only to the service providers listed below, only
+to the extent needed to provide the feature you request, and never for advertising
+or resale:
+
+- **Anthropic, PBC (Claude API)** — receives the text of the email you have open
+  (to detect event details) and, for an availability request, the activity and
+  proposed time (to draft your reply). Anthropic does **not** receive your calendar
+  events. Anthropic privacy policy: https://www.anthropic.com/legal/privacy
+- **Google Cloud (Cloud Run, US region)** — hosts the MailGenie backend that
+  processes those requests. Data is handled transiently to answer a single request
+  and is not stored. Google Cloud privacy notice:
+  https://cloud.google.com/terms/cloud-privacy-notice
+- **Stripe, Inc.** — receives only your email address and subscription identifiers
+  to process Premium payments. Stripe does **not** receive your email content or
+  calendar data. Stripe privacy policy: https://stripe.com/privacy
+- **Google Calendar** — events you approve are written back to your own Google
+  Calendar with your OAuth token, directly from your browser.
+
+We do **not** sell, rent, or transfer Google user data to any other party, and we
+do not use it for advertising, credit, lending, or to build user profiles.
+
+## Limited Use & AI processing
+
+MailGenie uses **Anthropic's Claude API** (Anthropic's commercial/paid API tier) to
+detect events in the email you open and to draft availability replies. Under
+Anthropic's Commercial Terms of Service
+(https://www.anthropic.com/legal/commercial-terms), Anthropic **does not train its
+models** on inputs or outputs submitted through the API.
+
+MailGenie does **not** use Google user data — whether raw, aggregated, or derived —
+to train, create, or improve any generalized or foundational machine-learning or
+artificial-intelligence model, and does **not** transfer Google user data to any
+third party for that purpose.
+
+The use of raw or derived user data received from Google Workspace APIs (including
+the Google Calendar API) will adhere to the Google API Services User Data Policy
+(https://developers.google.com/terms/api-services-user-data-policy), including the
+Limited Use requirements.
 
 ## Data retention
 
